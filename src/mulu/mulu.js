@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { extension_settings, getContext } from '../../../../../extensions.js';
 import { showMoreMessages } from '../../../../../../script.js';
-import { setLastUserPage, realignPagination, getColStep, setExplicitJumpLoading, updateActiveReadingAnchor, activateWindowForMessage } from '../pagination/pagination.js?v=1.0.26';
+import { setLastUserPage, realignPagination, getColStep, setExplicitJumpLoading, updateActiveReadingAnchor, activateWindowForMessage } from '../pagination/pagination.js?v=1.0.27';
 
 // ============================================================
 // P2 & P3：TauriTavern Store & Search API 接入层
@@ -1543,7 +1543,7 @@ async function showMuluModal() {
         progressSpan.innerText = `准备中...`;
 
         try {
-            const { triggerBatchCommentsForMessages } = await import('../paragraph/paragraph.js?v=1.0.26');
+            const { triggerBatchCommentsForMessages } = await import('../paragraph/paragraph.js?v=1.0.27');
             // Sequentially generate with progress callback and log callback
             await triggerBatchCommentsForMessages(
                 selectedIds,

@@ -2,7 +2,7 @@
     "display_name": "阅读",
     "author": "食熊则肥",
     "description": "将SillyTavern原本的上下滚动阅读转换为左右翻页阅读模式。",
-    "version": "1.0.26",
+    "version": "1.0.27",
     "minimum_client_version": "1.11.0",
     "js": "index.js",
     "css": "style.css",

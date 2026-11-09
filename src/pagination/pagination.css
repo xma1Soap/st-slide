@@ -139,9 +139,11 @@ body.twt-reading-mode #chat > .twt-mes-window-hidden {
 }
 
 /* 切入聊天室首帧 CSS 硬件级预裁剪：在酒馆 printMessages 批量插入大量楼层 DOM 的同时，
-   无需等待 JS 回调即可自动隐藏前序楼层，仅对末尾最后 4 层进行排版，彻底杜绝进场全量重排阻塞 */
-body.twt-reading-mode.twt-chat-switching #chat > .mes:not(:nth-last-child(-n+4)),
-body.twt-reading-mode #chat.twt-chat-switching > .mes:not(:nth-last-child(-n+4)) {
+   无需等待 JS 回调即可自动隐藏前序楼层，仅对末尾最后 4 层进行排版，彻底杜绝进场全量重排阻塞。
+   只在 JS 楼层窗口生效前（#chat 没有 .twt-win-ready）起作用：窗口排的是 5 楼，和这里的 4 个元素不一样，
+   两者同时生效会让遮罩开关前后页数突变，手机上后台补楼层时位置被截断到别的楼层（跳页）。 */
+body.twt-reading-mode.twt-chat-switching #chat:not(.twt-win-ready) > .mes:not(:nth-last-child(-n+4)),
+body.twt-reading-mode #chat.twt-chat-switching:not(.twt-win-ready) > .mes:not(:nth-last-child(-n+4)) {
     display: none !important;
 }
 

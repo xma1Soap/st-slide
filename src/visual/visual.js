@@ -1,4 +1,4 @@
-import { setClass } from '../utils/class_guard.js?v=1.0.26';
+import { setClass } from '../utils/class_guard.js?v=1.0.27';
 function getAllDocs() {
     const docs = [document];
     try {

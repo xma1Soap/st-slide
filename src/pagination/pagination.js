@@ -1,8 +1,8 @@
 // @ts-nocheck
 import { extension_settings, getContext } from '../../../../../extensions.js';
 import { showMoreMessages } from '../../../../../../script.js';
-import { hideMessageHtmlAppsSync } from '../html_popup/html_popup.js?v=1.0.26';
-import { setClass } from '../utils/class_guard.js?v=1.0.26';
+import { hideMessageHtmlAppsSync } from '../html_popup/html_popup.js?v=1.0.27';
+import { setClass } from '../utils/class_guard.js?v=1.0.27';
 
 // ============================================================
 // P1：TauriTavern API 接入层 — 阅读位置记忆
@@ -162,6 +162,7 @@ let lastKnownScrollWidth = 0;   // Last scrollWidth seen by MutationObserver, fo
 let stableColWidthTimer = null; // Timer to rebuild stableColWidth after streaming ends
 let winStartIdx = 0;            // 当前激活的楼层窗口起始索引（含）
 let winEndIdx = -1;             // 当前激活的楼层窗口结束索引（含）
+let winStartEl = null;          // 窗口第一楼的元素，用来判断新插入的楼层是不是补在窗口前面的历史楼层
 let totalDomMesCount = 0;       // DOM 中总 .mes 数量
 
 // ============================================================
@@ -214,7 +215,8 @@ export function scheduleRestoreSettle(delay = 600) {
                 applyRestoreTarget(chat, cw);
             }
         }
-        chatRestoreTarget = null;
+        // 不在这里清空 chatRestoreTarget：手机上历史楼层可能在稳定期结束后才陆续补进来，
+        // 用户翻页前每次补楼层都要重新钉回目标位置。用户一操作（userInteractedSinceSwitch）就不再生效。
     }, delay);
 }
 // 严禁在日常高频日志中调用 chat.scrollWidth 或 elementFromPoint，彻底消除强制同步重排 (Layout Thrashing)
@@ -333,7 +335,7 @@ function ensureDiagPanel() {
 
     panel.innerHTML = `
         <div id="twt-diag-header" style="display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap;">
-            <span id="twt-diag-status" style="font-weight:bold;color:#38bdf8;font-size:11px;">📊 TwT v1.0.26 诊断就绪</span>
+            <span id="twt-diag-status" style="font-weight:bold;color:#38bdf8;font-size:11px;">📊 TwT v1.0.27 诊断就绪</span>
             <div style="display:flex;gap:5px;align-items:center;">
                 <button id="twt-diag-copy-btn" type="button" style="background:#0284c7;color:#fff;border:none;border-radius:4px;padding:3px 7px;font-size:11px;cursor:pointer;font-weight:bold;">📋 复制日志</button>
                 <button id="twt-diag-clear-btn" type="button" style="background:#475569;color:#fff;border:none;border-radius:4px;padding:3px 6px;font-size:11px;cursor:pointer;">清空</button>
@@ -380,7 +382,7 @@ function ensureDiagPanel() {
         e.stopPropagation();
         twtDiagLog('USER_COPY_LOGS', '用户点击复制日志按钮');
         const headerInfo = [
-            `=== TwT Pagination Diagnostic Report (v1.0.23) ===`,
+            `=== TwT Pagination Diagnostic Report (v1.0.27) ===`,
             `Time: ${new Date().toISOString()}`,
             `UA: ${navigator.userAgent}`,
             `Viewport: ${window.innerWidth}x${window.innerHeight} (dpr=${window.devicePixelRatio})`,
@@ -613,6 +615,8 @@ function applyFloorWindowByIndex(chat, centerIdx, radiusBefore = 2, radiusAfter 
     if (total === 0) {
         winStartIdx = 0;
         winEndIdx = -1;
+        winStartEl = null;
+        setClass(chat, 'twt-win-ready', false);
         return false;
     }
 
@@ -679,6 +683,10 @@ function applyFloorWindowByIndex(chat, centerIdx, radiusBefore = 2, radiusAfter 
 
     winStartIdx = newStart;
     winEndIdx = newEnd;
+    winStartEl = allMes[newStart];
+    // 窗口已生效，切聊天遮罩期间的 CSS 预裁剪（只排最后 4 个元素）让位给窗口，
+    // 否则遮罩开关前后排版的楼层不同，页数突变，浏览器会把位置截断到错误的楼层（见 pagination.css）
+    setClass(chat, 'twt-win-ready', true);
 
     // 关键优化：切入聊天且用户尚未交互时，延迟至揭开遮罩后再异步渲染复杂浮窗/微件，消除首屏挂载卡顿
     if (newlyRevealed.length > 0 && userInteractedSinceSwitch) {
@@ -1168,7 +1176,10 @@ export async function handleMoreMessagesLoaded(isExplicitJump = isExplicitJumpLo
     // 此时后台分批补全历史楼层（20->40->60->95）绝对不可跳往 'start' 或依据未初始化锚点计算位移！
     // 保持遮罩覆盖、严格锁定在末尾窗口 'end'，彻底杜绝跳页与中间态暴露！
     if (!userInteractedSinceSwitch && (!chatRestoreTarget || chatRestoreTarget.mode === 'end')) {
-        showLoadingOverlay();
+        // 窗口已经生效时，补进来的历史楼层在插入那一刻就被隐藏了（见 MutationObserver），画面不会变，
+        // 不需要再盖遮罩；否则手机上每补一批都会闪一下齿轮
+        if (!chat.classList.contains('twt-win-ready')) showLoadingOverlay();
+        if (!chatRestoreTarget) chatRestoreTarget = { mode: 'end' };
         isChatRestoring = true;
         activateWindowForMessage('end');
         containOversizedElements();
@@ -1795,6 +1806,7 @@ function initMutationObserver() {
         let addedShowMore = false;
         let addedLastMes = false;
         let hasMeaningfulDomChange = false;
+        const addedFloors = [];
         if (mutations && mutations.length > 0) {
             for (let i = 0; i < mutations.length; i++) {
                 const m = mutations[i];
@@ -1809,6 +1821,7 @@ function initMutationObserver() {
                             if (node.nodeType === 1) {
                                 if (node.id === 'show_more_messages') addedShowMore = true;
                                 if (node.classList?.contains('last_mes')) addedLastMes = true;
+                                if (m.target === chat && node.classList?.contains('mes')) addedFloors.push(node);
                                 if (!node.classList?.contains('twt-comment-badge') &&
                                     !node.classList?.contains('twt-toolcall-floor-badge') &&
                                     !node.classList?.contains('twt-app-placeholder')) {
@@ -1828,6 +1841,30 @@ function initMutationObserver() {
                         }
                     }
                 }
+            }
+        }
+
+        // 聊天被清空：旧窗口作废，切聊天遮罩期间重新由 CSS 预裁剪兜底
+        if (chat.children.length <= 1) {
+            winStartEl = null;
+            setClass(chat, 'twt-win-ready', false);
+        }
+
+        // 补在窗口前面的历史楼层（showMoreMessages 或其他扩展后台加载）在插入的同一微任务里立刻隐藏，
+        // 不让它们参与排版：既省掉一次几十楼的重排，也不会把正在看的页挤走
+        if (addedFloors.length > 0 && winStartEl && winStartEl.isConnected && chat.classList.contains('twt-win-ready')) {
+            let prepended = 0;
+            for (const node of addedFloors) {
+                if (node === winStartEl || !node.isConnected) continue;
+                if (node.compareDocumentPosition(winStartEl) & Node.DOCUMENT_POSITION_FOLLOWING) {
+                    if (!node.classList.contains('twt-mes-window-hidden')) node.classList.add('twt-mes-window-hidden');
+                    prepended++;
+                }
+            }
+            if (prepended > 0) {
+                winStartIdx += prepended;
+                winEndIdx += prepended;
+                totalDomMesCount += prepended;
             }
         }
 
@@ -2780,7 +2817,7 @@ export function realignPagination(verbose = true) {
 // ============================================================
 // resetPaginationBinding：切换聊天时重置并重绑定
 // ============================================================
-import { invalidateMuluStoreCache } from '../mulu/mulu.js?v=1.0.26';
+import { invalidateMuluStoreCache } from '../mulu/mulu.js?v=1.0.27';
 
 export function resetPaginationBinding(getSettings) {
     twtDiagEpoch = Date.now();
@@ -2827,6 +2864,7 @@ export function resetPaginationBinding(getSettings) {
     lastKnownScrollWidth = 0;
     winStartIdx = 0;
     winEndIdx = -1;
+    winStartEl = null;
     totalDomMesCount = 0;
     clearTimeout(stableColWidthTimer);
     isScrolling  = false;
