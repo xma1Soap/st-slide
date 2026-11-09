@@ -1,13 +1,13 @@
 // @ts-nocheck
 import { extension_settings, getContext, renderExtensionTemplateAsync } from '../../../extensions.js';
-import { applyPaginationMode, initPaginationEvent, resetPaginationBinding, realignPagination, handleMoreMessagesLoaded, handleNewMessageRendered, updateActiveReadingAnchor, handleUserMessageSent, handleMessageSwiped, handleGenerationStarted, handleGenerationEnded, handleMessageDeleted, autoNormalizeBubbleTheme, cleanupBubbleThemeNormalization, generateBubbleThemePatchCss, updateDiagPanelVisibility } from './src/pagination/pagination.js?v=1.0.28';
-import { applyVisualMode } from './src/visual/visual.js?v=1.0.28';
-import { setClass } from './src/utils/class_guard.js?v=1.0.28';
-import { saveFontToStorage, getFontBlobUrl, deleteFontFromStorage } from './src/visual/font_storage.js?v=1.0.28';
-import { initMulu, applyMuluSettings } from './src/mulu/mulu.js?v=1.0.28';
-import { initMenu, applyMenuMode, applyFullscreenMode } from './src/menu/menu.js?v=1.0.28';
-import { initHtmlPopup, applyHtmlPopupSettings, registerHtmlPopupEvents } from './src/html_popup/html_popup.js?v=1.0.28';
-import { registerSlashCommands } from './src/slash_commands.js?v=1.0.28';
+import { applyPaginationMode, initPaginationEvent, resetPaginationBinding, realignPagination, handleMoreMessagesLoaded, handleNewMessageRendered, updateActiveReadingAnchor, handleUserMessageSent, handleMessageSwiped, handleGenerationStarted, handleGenerationEnded, handleMessageDeleted, autoNormalizeBubbleTheme, cleanupBubbleThemeNormalization, generateBubbleThemePatchCss, updateDiagPanelVisibility } from './src/pagination/pagination.js?v=1.0.29';
+import { applyVisualMode } from './src/visual/visual.js?v=1.0.29';
+import { setClass } from './src/utils/class_guard.js?v=1.0.29';
+import { saveFontToStorage, getFontBlobUrl, deleteFontFromStorage } from './src/visual/font_storage.js?v=1.0.29';
+import { initMulu, applyMuluSettings } from './src/mulu/mulu.js?v=1.0.29';
+import { initMenu, applyMenuMode, applyFullscreenMode } from './src/menu/menu.js?v=1.0.29';
+import { initHtmlPopup, applyHtmlPopupSettings, registerHtmlPopupEvents } from './src/html_popup/html_popup.js?v=1.0.29';
+import { registerSlashCommands } from './src/slash_commands.js?v=1.0.29';
 
 let parentDoc = document;
 try {
@@ -132,6 +132,7 @@ const defaultSettings = {
     diagLogEnabled: false,
     qrInjectEnabled: true,
     swipeEnabled: true,
+    pageFlipAnimation: 'none',
     messagePageEnabled: false,
     autoBubbleThemeEnabled: true,
     autoScrollNewMessage: true,
@@ -1628,6 +1629,7 @@ function bindUI() {
     const $diagEnabled = $('#twt_diag_enabled, #twt_page_diag_enabled');
     const $qrInjectEnabled = $('#twt_qr_inject_enabled');
     const $swipeEnabled = $('#twt_swipe_enabled');
+    const $pageFlipAnimation = $('#twt_page_flip_animation');
     const $messagePageEnabled = $('#twt_message_page_enabled');
     const $autoBubbleThemeEnabled = $('#twt_auto_bubble_theme_enabled');
     const $autoScrollNewMessage = $('#twt_auto_scroll_new_message');
@@ -1700,6 +1702,7 @@ function bindUI() {
     $diagEnabled.prop('checked', extension_settings.twt.diagLogEnabled === true);
     $qrInjectEnabled.prop('checked', extension_settings.twt.qrInjectEnabled !== false);
     $swipeEnabled.prop('checked', extension_settings.twt.swipeEnabled);
+    $pageFlipAnimation.val(['slide', 'fade'].includes(extension_settings.twt.pageFlipAnimation) ? extension_settings.twt.pageFlipAnimation : 'none');
     $messagePageEnabled.prop('checked', extension_settings.twt.messagePageEnabled);
     $autoBubbleThemeEnabled.prop('checked', extension_settings.twt.autoBubbleThemeEnabled !== false);
     $autoScrollNewMessage.prop('checked', extension_settings.twt.autoScrollNewMessage !== false);
@@ -3289,6 +3292,13 @@ function bindUI() {
         extension_settings.twt.swipeEnabled = $(this).prop('checked');
         getContext().saveSettingsDebounced();
         applyPaginationMode(extension_settings.twt.enabled, extension_settings.twt);
+    });
+
+    // 翻页动画：翻页时现读设置，不用重新应用翻页模式
+    $pageFlipAnimation.on('change', function () {
+        const v = $(this).val();
+        extension_settings.twt.pageFlipAnimation = ['slide', 'fade'].includes(v) ? v : 'none';
+        getContext().saveSettingsDebounced();
     });
 
     $messagePageEnabled.on('change', function () {

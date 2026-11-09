@@ -1,8 +1,8 @@
 // @ts-nocheck
 import { extension_settings, getContext } from '../../../../../extensions.js';
 import { showMoreMessages } from '../../../../../../script.js';
-import { hideMessageHtmlAppsSync } from '../html_popup/html_popup.js?v=1.0.28';
-import { setClass } from '../utils/class_guard.js?v=1.0.28';
+import { hideMessageHtmlAppsSync } from '../html_popup/html_popup.js?v=1.0.29';
+import { setClass } from '../utils/class_guard.js?v=1.0.29';
 
 // ============================================================
 // P1：TauriTavern API 接入层 — 阅读位置记忆
@@ -318,7 +318,7 @@ function ensureDiagPanel() {
 
     panel.innerHTML = `
         <div id="twt-diag-header" style="display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap;">
-            <span id="twt-diag-status" style="font-weight:bold;color:#38bdf8;font-size:11px;">📊 TwT v1.0.28 诊断就绪</span>
+            <span id="twt-diag-status" style="font-weight:bold;color:#38bdf8;font-size:11px;">📊 TwT v1.0.29 诊断就绪</span>
             <div style="display:flex;gap:5px;align-items:center;">
                 <button id="twt-diag-copy-btn" type="button" style="background:#0284c7;color:#fff;border:none;border-radius:4px;padding:3px 7px;font-size:11px;cursor:pointer;font-weight:bold;">📋 复制日志</button>
                 <button id="twt-diag-clear-btn" type="button" style="background:#475569;color:#fff;border:none;border-radius:4px;padding:3px 6px;font-size:11px;cursor:pointer;">清空</button>
@@ -365,7 +365,7 @@ function ensureDiagPanel() {
         e.stopPropagation();
         twtDiagLog('USER_COPY_LOGS', '用户点击复制日志按钮');
         const headerInfo = [
-            `=== TwT Pagination Diagnostic Report (v1.0.28) ===`,
+            `=== TwT Pagination Diagnostic Report (v1.0.29) ===`,
             `Time: ${new Date().toISOString()}`,
             `UA: ${navigator.userAgent}`,
             `Viewport: ${window.innerWidth}x${window.innerHeight} (dpr=${window.devicePixelRatio})`,
@@ -502,6 +502,7 @@ function startLagDetector() {
 // ============================================================
 let isScrollTopLocked = false;
 let origScrollTopDescriptor = null;
+let quietScrollWrites = false;  // 翻页动画开始前临时跳到目标页记锚点，这两次写入不进诊断日志
 
 export function lockChatScrollTop(chat) {
     if (!chat || isScrollTopLocked) return;
@@ -549,8 +550,8 @@ export function lockChatScrollTop(chat) {
                     const after = descLeft.get.call(chat);
                     twtDiagLastJsSetSL = after;
                     twtDiagLastObservedSL = after;
-                    // 手指连续跟手滑动(isTouching)期间不刷屏记录每一帧 setter，其余任何时刻写入 scrollLeft 均记录调用栈与钳制对比
-                    if (!isTouching && document.body.classList.contains('twt-reading-mode')) {
+                    // 手指连续跟手滑动(isTouching)、翻页动画播放期间不刷屏记录每一帧 setter，其余任何时刻写入 scrollLeft 均记录调用栈与钳制对比
+                    if (!isTouching && !flipAnim && !quietScrollWrites && document.body.classList.contains('twt-reading-mode')) {
                         const clampedNote = Math.abs(after - val) > 2 ? ` ⚠️CLAMPED(req=${Math.round(val)}->actual=${Math.round(after)})` : '';
                         twtDiagLog('SET_SL', `${Math.round(prev)}->${Math.round(after)} (req=${Math.round(val)})${clampedNote}`);
                     }
@@ -648,6 +649,8 @@ function applyFloorWindowByIndex(chat, centerIdx, radiusBefore = 2, radiusAfter 
 
     const newlyRevealed = [];
     let anyChanged = (newStart !== winStartIdx || newEnd !== winEndIdx);
+    // 上一次隐藏 / 删掉的楼层不用再盯着了（这次刚隐藏的先留着，让 ResizeObserver 报一次"变成 0"）
+    pruneObservedFloors();
     for (let i = 0; i < total; i++) {
         const m = allMes[i];
         if (i >= newStart && i <= newEnd) {
@@ -656,6 +659,7 @@ function applyFloorWindowByIndex(chat, centerIdx, radiusBefore = 2, radiusAfter 
                 newlyRevealed.push(m);
                 anyChanged = true;
             }
+            observeFloor(m);
         } else {
             if (!m.hasAttribute('data-twt-win-hidden')) {
                 m.setAttribute('data-twt-win-hidden', '');
@@ -834,6 +838,8 @@ function slideFloorWindowIfNeeded(chat, cw, direction = 'auto') {
     const newPage = Math.max(0, Math.round(chat.scrollLeft / step));
     lastUserPage = newPage;
     chat.scrollLeft = newPage * step;
+    // 这次挪动已经补偿过了，页首那行字跟着挪同样的页数，免得 ResizeObserver 再补一次
+    if (lineAnchor) lineAnchor.page += newPage - curPage;
     if (!wasScrolling) {
         isScrolling = false;
     }
@@ -977,6 +983,513 @@ export function updateActiveReadingAnchor(force = false) {
     if (anchor && anchor.mesId) {
         activeReadingAnchor = anchor;
     }
+    if (userInteractedSinceSwitch) captureLineAnchor();
+}
+
+// ============================================================
+// 页首行锚点：前面楼层的内容晚到、变高变矮时，让读者正在看的那一行字留在屏幕上
+// ============================================================
+// 多列排版里，前面任何一楼高度变了，后面所有内容都会整体挪动若干页。页码不变的话，
+// 读者看到的就成了上一页（或下一页）的内容，看起来像插件自己翻了一页。
+// TauriTavern 的楼层正文是排队异步处理的（先空着、aria-busy，处理完才填进去），
+// 代码预览 iframe、角色卡前端界面也会晚一点才撑开高度，手机上慢，很容易碰上。
+// 做法：记住页首那一行字（文本节点 + 字符位置），窗口里的楼层尺寸一变（ResizeObserver），
+// 就重新算这行字现在在第几页，它挪了几页，当前页就跟着挪几页。
+// ResizeObserver 的回调在排版之后、绘制之前执行，所以读者看不到挪动前的那一帧。
+let lineAnchor = null;          // { node, offset, mesEl, mesId, msgObj, nextEl, nextMsgObj, floorPageOffset, page, cw }
+let floorResizeObserver = null;
+const observedFloors = new Set();
+let lineKeepRetryTimer = null;
+let lineKeepRetryCount = 0;
+let lineRecaptureTimer = null;
+let lineRange = null;
+// 楼层里这些地方的文字会被酒馆或插件整段替换（计时、按钮、段评角标等），不拿来当锚点
+const LINE_ANCHOR_SKIP = '.mes_buttons, .mes_edit_buttons, .swipe_left, .swipe_right, .swipes-counter, .mesIDDisplay, .mes_timer, .tokenCounterDisplay, .timestamp, .twt-comment-badge, .twt-toolcall-floor-badge, .twt-app-placeholder';
+
+function caretAt(x, y) {
+    try {
+        if (document.caretRangeFromPoint) {
+            const r = document.caretRangeFromPoint(x, y);
+            return r ? { node: r.startContainer, offset: r.startOffset } : null;
+        }
+        if (document.caretPositionFromPoint) {
+            const p = document.caretPositionFromPoint(x, y);
+            return p ? { node: p.offsetNode, offset: p.offset } : null;
+        }
+    } catch {}
+    return null;
+}
+
+// 文本节点里第 offset 个字现在在第几页（没有排版时返回 null）
+function pageOfText(chat, cw, cr, node, offset) {
+    if (!node || node.nodeType !== 3 || !node.isConnected) return null;
+    const len = node.length;
+    if (!len) return null;
+    const s = Math.max(0, Math.min(offset, len - 1));
+    if (!lineRange) lineRange = document.createRange();
+    try {
+        lineRange.setStart(node, s);
+        lineRange.setEnd(node, s + 1);
+    } catch { return null; }
+    const rects = lineRange.getClientRects();
+    for (let i = 0; i < rects.length; i++) {
+        const r = rects[i];
+        if (r.height > 0) return Math.max(0, Math.floor((r.left - cr.left + chat.scrollLeft + 1) / cw));
+    }
+    return null;
+}
+
+// 楼层占的页码范围
+function floorPagesOf(chat, cw, cr, mes) {
+    if (!mes) return null;
+    const r = mes.getBoundingClientRect();
+    if (r.width === 0 && r.height === 0) return null;
+    const sl = chat.scrollLeft;
+    const start = Math.max(0, Math.floor((r.left - cr.left + sl + 1) / cw));
+    const end = Math.max(start, Math.floor((r.right - cr.left + sl - 1) / cw));
+    return { start, end };
+}
+
+function firstFloorOnPage(chat, cr) {
+    const nodes = chat.querySelectorAll(':scope > .mes:not([data-twt-win-hidden])');
+    for (let i = 0; i < nodes.length; i++) {
+        const rects = nodes[i].getClientRects();
+        for (let j = 0; j < rects.length; j++) {
+            if (rects[j].right > cr.left + 4 && rects[j].left < cr.right - 4) return nodes[i];
+        }
+    }
+    return null;
+}
+
+// 这一楼此刻有没有内容显示在屏幕上（当前页）
+function isFloorOnScreen(chat, mes) {
+    if (!chat || !mes || mes.parentElement !== chat || mes.hasAttribute('data-twt-win-hidden')) return false;
+    const cr = chat.getBoundingClientRect();
+    const rects = mes.getClientRects();
+    for (let i = 0; i < rects.length; i++) {
+        const r = rects[i];
+        if ((r.width > 0 || r.height > 0) && r.right > cr.left + 4 && r.left < cr.right - 4) return true;
+    }
+    return false;
+}
+
+function messageObjOf(mesId) {
+    try {
+        const list = getContext()?.chat;
+        const i = Number(mesId);
+        if (Array.isArray(list) && Number.isInteger(i) && i >= 0) return list[i] || null;
+    } catch {}
+    return null;
+}
+
+// 消息对象现在对应的楼层元素（TauriTavern 删除 / 重新渲染时会给后面的消息换新元素，mesid 也会变）
+function floorOfMessageObj(chat, obj) {
+    if (!obj) return null;
+    try {
+        const list = getContext()?.chat;
+        const i = Array.isArray(list) ? list.indexOf(obj) : -1;
+        if (i >= 0) return chat.querySelector(`:scope > .mes[mesid="${i}"]`);
+    } catch {}
+    return null;
+}
+
+function setLineAnchor(chat, cw, cr, page, mes, node, offset) {
+    const fp = floorPagesOf(chat, cw, cr, mes);
+    const mesId = mes.getAttribute('mesid');
+    let nextEl = mes.nextElementSibling;
+    while (nextEl && !(nextEl.classList && nextEl.classList.contains('mes'))) nextEl = nextEl.nextElementSibling;
+    lineAnchor = {
+        node, offset, mesEl: mes, mesId,
+        msgObj: messageObjOf(mesId),
+        nextEl: nextEl || null,
+        nextMsgObj: mesId !== null ? messageObjOf(Number(mesId) + 1) : null,
+        floorPageOffset: fp ? Math.max(0, page - fp.start) : 0,
+        page, cw,
+    };
+}
+
+// 按当前画面记下页首那一行字；页首没有文字（整页图片等）时退回"第几楼的第几页"
+function captureLineAnchorNow(chat, cw) {
+    if (!chat || cw <= 0) return false;
+    const cr = chat.getBoundingClientRect();
+    if (cr.width <= 0 || cr.height <= 0) return false;
+    const page = Math.max(0, Math.round(chat.scrollLeft / cw));
+    const yEnd = cr.top + cr.height * 0.45;
+    for (let y = cr.top + 8; y < yEnd; y += 14) {
+        for (let k = 0; k < 3; k++) {
+            const fx = k === 0 ? 0.5 : (k === 1 ? 0.22 : 0.78);
+            const pos = caretAt(cr.left + cr.width * fx, y);
+            const node = pos && pos.node;
+            if (!node || node.nodeType !== 3 || !node.length) continue;
+            const host = node.parentElement;
+            if (!host || !chat.contains(host) || host.closest(LINE_ANCHOR_SKIP)) continue;
+            const mes = host.closest('.mes');
+            if (!mes || mes.parentElement !== chat || mes.hasAttribute('data-twt-win-hidden')) continue;
+            // 光标可能落在空白上，往后挪到第一个看得见的字
+            const text = node.data;
+            let off = Math.min(pos.offset, text.length - 1);
+            while (off < text.length - 1 && /\s/.test(text[off])) off++;
+            if (pageOfText(chat, cw, cr, node, off) !== page) continue;
+            setLineAnchor(chat, cw, cr, page, mes, node, off);
+            return true;
+        }
+    }
+    const mes = firstFloorOnPage(chat, cr);
+    if (mes) {
+        setLineAnchor(chat, cw, cr, page, mes, null, 0);
+        return true;
+    }
+    lineAnchor = null;
+    return false;
+}
+
+function captureLineAnchor() {
+    if (isTouching || flipAnim) return;
+    const chat = getChat();
+    if (!chat || !document.body.classList.contains('twt-reading-mode')) return;
+    if (document.body.classList.contains('twt-paragraph-editing')) return;
+    const cw = stableColWidth;
+    if (cw <= 0) return;
+    // 先把上一次记下的那行字可能已经发生的位移补上，再重新记。
+    // 否则"内容挪动"和"重新记录"挤在同一帧里时，挪动会被当成正常位置吃掉。
+    if (lineAnchor && keepReadingLine('capture') === 'deferred') return;
+    captureLineAnchorNow(chat, cw);
+}
+
+// 手指按下时确保有锚点（进聊天后第一次翻页时还没有）
+function ensureLineAnchor(chat, cw) {
+    if (lineAnchor || !chat || cw <= 0 || flipAnim) return;
+    if (!document.body.classList.contains('twt-reading-mode')) return;
+    if (Math.abs(chat.scrollLeft - lastUserPage * cw) > 1) return;
+    captureLineAnchorNow(chat, cw);
+}
+
+// 翻页前：先把还没来得及补的位移补上（同一帧里前面楼层刚变过、ResizeObserver 还没回调），再从正确的页往前 / 往后翻
+function prepareLineAnchorForFlip(chat, cw) {
+    if (!chat || cw <= 0 || flipAnim) return;
+    if (!document.body.classList.contains('twt-reading-mode')) return;
+    if (lineAnchor) {
+        keepReadingLine('pre-flip');
+        return;
+    }
+    ensureLineAnchor(chat, cw);
+}
+
+// 那一行字现在在第几页
+function resolveLineAnchor(chat, cw, cr) {
+    const a = lineAnchor;
+    if (!a) return null;
+    if (a.node && a.node.isConnected) {
+        const p = pageOfText(chat, cw, cr, a.node, a.offset);
+        // 字还在但没有排版（所在楼层被隐藏、被折叠等）：这次不动
+        return p === null ? null : { page: p, how: 'text' };
+    }
+    let mes = (a.mesEl && a.mesEl.isConnected && a.mesEl.parentElement === chat) ? a.mesEl : null;
+    let how = 'floor';
+    if (!mes) {
+        mes = floorOfMessageObj(chat, a.msgObj);
+        how = 'msg';
+    }
+    if (!mes || mes.hasAttribute('data-twt-win-hidden')) return null;
+    const fp = floorPagesOf(chat, cw, cr, mes);
+    if (!fp) return null;
+    return { page: Math.min(fp.end, fp.start + a.floorPageOffset), how, mes };
+}
+
+// 返回 'moved' | 'same' | 'deferred' | 'skip'
+function keepReadingLine(reason, force = false) {
+    if (!lineAnchor) return 'skip';
+    const chat = getChat();
+    if (!chat || !document.body.classList.contains('twt-reading-mode')) return 'skip';
+    if (document.body.classList.contains('twt-paragraph-editing')) return 'skip';
+    // 加载历史楼层时由 handleMoreMessagesLoaded 自己补偿位置
+    if (isLoadingMoreMessages && !force) return 'skip';
+    const cw = stableColWidth;
+    if (cw <= 0 || Math.abs(lineAnchor.cw - cw) > 0.5) return 'skip';
+    // 手指按着（拖动中）或正在打字时先不动，稍后再补。
+    // force：调用方紧接着要按页码做判断（新消息、加载历史），打字时也要先换算好
+    if (isTouching || (!force && isInputFocused())) {
+        scheduleLineKeepRetry();
+        return 'deferred';
+    }
+    const cr = chat.getBoundingClientRect();
+    // 宽度正在变（转屏等）：交给 #chat 的 ResizeObserver 统一重排
+    if (Math.abs(cr.width - cw) > 1) return 'skip';
+    const res = resolveLineAnchor(chat, cw, cr);
+    if (!res) return 'skip';
+    if (res.mes) lineAnchor.mesEl = res.mes;
+    if (res.how !== 'text') scheduleLineRecapture();
+    const shift = res.page - lineAnchor.page;
+    if (shift === 0) return 'same';
+    lineAnchor.page = res.page;
+    if (flipAnim) finishFlipAnimation();
+    const sw = chat.scrollWidth;
+    lastKnownScrollWidth = sw;
+    const total = Math.max(1, Math.round(sw / cw));
+    const prev = lastUserPage;
+    const target = Math.max(0, Math.min(total - 1, lastUserPage + shift));
+    lastUserPage = target;
+    chat.scrollLeft = target * cw;
+    twtDiagLog('ANCHOR_KEEP', `${reason}: 前面内容变化，页首那行字挪了 ${shift > 0 ? '+' : ''}${shift} 页(${res.how}) p:${prev}->${target}/${total}`);
+    return 'moved';
+}
+
+function scheduleLineKeepRetry() {
+    if (lineKeepRetryTimer) return;
+    if (++lineKeepRetryCount > 40) {
+        lineKeepRetryCount = 0;
+        return;
+    }
+    lineKeepRetryTimer = setTimeout(() => {
+        lineKeepRetryTimer = null;
+        if (keepReadingLine('retry') !== 'deferred') lineKeepRetryCount = 0;
+    }, 120);
+}
+
+// 锚点那行字被整段替换了（正文重新渲染），这次先按楼层对齐，稍后重新记一行字
+function scheduleLineRecapture() {
+    if (lineRecaptureTimer) return;
+    lineRecaptureTimer = setTimeout(() => {
+        lineRecaptureTimer = null;
+        if (!isTouching && !isScrolling && userInteractedSinceSwitch) captureLineAnchor();
+    }, 150);
+}
+
+// 恢复阶段（进聊天后还没翻过页）：前面楼层变化时重新钉回恢复目标（通常是最新楼层第一页）
+function keepRestoreTarget() {
+    const chat = getChat();
+    const cw = stableColWidth;
+    if (!chat || cw <= 0 || !chatRestoreTarget) return;
+    if (isTouching || isLoadingMoreMessages || isGenerating || isInputFocused()) return;
+    if (document.body.classList.contains('twt-paragraph-editing')) return;
+    if (Math.abs(chat.getBoundingClientRect().width - cw) > 1) return;
+    applyRestoreTarget(chat, cw, true);
+}
+
+function onFloorsResized(entries) {
+    if (!document.body.classList.contains('twt-reading-mode')) return;
+    const anchorMes = lineAnchor && lineAnchor.mesEl && lineAnchor.mesEl.isConnected ? lineAnchor.mesEl : null;
+    let relevant = false;
+    for (let i = 0; i < entries.length; i++) {
+        const el = entries[i].target;
+        if (!el.isConnected || el.hasAttribute('data-twt-win-hidden')) {
+            // 楼层被隐藏或删掉了：这次变化要处理，之后不用再盯着它
+            floorResizeObserver.unobserve(el);
+            observedFloors.delete(el);
+            relevant = true;
+            continue;
+        }
+        // 只有读者所在楼层及其前面的楼层变化才会挪动当前页（后面的楼层变化，比如流式输出，不用管）
+        if (!relevant && (!anchorMes || el === anchorMes || (el.compareDocumentPosition(anchorMes) & Node.DOCUMENT_POSITION_FOLLOWING))) {
+            relevant = true;
+        }
+    }
+    if (!relevant) return;
+    if (!userInteractedSinceSwitch && chatRestoreTarget) {
+        keepRestoreTarget();
+        return;
+    }
+    keepReadingLine('resize');
+}
+
+function observeFloor(m) {
+    if (observedFloors.has(m)) return;
+    if (!floorResizeObserver) {
+        if (typeof ResizeObserver === 'undefined') return;
+        floorResizeObserver = new ResizeObserver(onFloorsResized);
+    }
+    floorResizeObserver.observe(m);
+    observedFloors.add(m);
+}
+
+function pruneObservedFloors() {
+    if (!floorResizeObserver) return;
+    for (const el of observedFloors) {
+        if (!el.isConnected || el.hasAttribute('data-twt-win-hidden')) {
+            floorResizeObserver.unobserve(el);
+            observedFloors.delete(el);
+        }
+    }
+}
+
+function disconnectFloorObserver() {
+    if (floorResizeObserver) floorResizeObserver.disconnect();
+    observedFloors.clear();
+    clearTimeout(lineKeepRetryTimer);
+    lineKeepRetryTimer = null;
+    lineKeepRetryCount = 0;
+    clearTimeout(lineRecaptureTimer);
+    lineRecaptureTimer = null;
+    lineAnchor = null;
+}
+
+// 转屏、键盘收起等整体重排后，按页首那行字重新定位
+function realignToLineAnchor(chat, cw) {
+    if (!lineAnchor) return false;
+    const cr = chat.getBoundingClientRect();
+    if (Math.abs(cr.width - cw) > 1) return false;
+    const res = resolveLineAnchor(chat, cw, cr);
+    if (!res || res.how !== 'text') return false;
+    // 列宽变了的话旧页码没有意义，直接以这行字所在页为准
+    const delta = Math.abs(lineAnchor.cw - cw) > 0.5 ? 0 : (lastUserPage - lineAnchor.page);
+    const sw = chat.scrollWidth;
+    lastKnownScrollWidth = sw;
+    const total = Math.max(1, Math.round(sw / cw));
+    const target = Math.max(0, Math.min(total - 1, res.page + delta));
+    lineAnchor.page = res.page;
+    lineAnchor.cw = cw;
+    twtDiagLog('REALIGN_LINE', `按页首那行字对齐 p:${lastUserPage}->${target}/${total}`);
+    isScrolling = true;
+    lastUserPage = target;
+    chat.scrollLeft = target * cw;
+    chat.scrollTop = 0;
+    clearTimeout(scrollUnlockTimer);
+    scrollUnlockTimer = setTimeout(() => {
+        isScrolling = false;
+        updateActiveReadingAnchor(true);
+    }, 60);
+    return true;
+}
+
+// 窗口被打乱（删了窗口里的楼层、TauriTavern 给后面的楼层换了一批新元素）时，以读者所在楼层为中心重排窗口。
+// 读者看的那一楼被删了的话，停在接替它位置的那一楼开头。
+function findAnchorFloorForRebuild(chat, allMes) {
+    const inChat = el => !!(el && el.isConnected && el.parentElement === chat);
+    const a = lineAnchor;
+    if (a) {
+        if (a.node && a.node.isConnected) {
+            const m = a.node.parentElement && a.node.parentElement.closest('.mes');
+            if (inChat(m)) return { mes: m, alive: true, offset: a.floorPageOffset };
+        }
+        if (inChat(a.mesEl)) return { mes: a.mesEl, alive: true, offset: a.floorPageOffset };
+        const byMsg = floorOfMessageObj(chat, a.msgObj);
+        if (byMsg) return { mes: byMsg, alive: true, offset: a.floorPageOffset };
+        if (inChat(a.nextEl)) return { mes: a.nextEl, alive: false, offset: 0 };
+        const byNext = floorOfMessageObj(chat, a.nextMsgObj);
+        if (byNext) return { mes: byNext, alive: false, offset: 0 };
+    } else if (activeReadingAnchor && activeReadingAnchor.mesId !== null && activeReadingAnchor.mesId !== undefined) {
+        const m = chat.querySelector(`:scope > .mes[mesid="${activeReadingAnchor.mesId}"]`);
+        if (m) return { mes: m, alive: false, offset: Math.max(0, Number(activeReadingAnchor.pageOffsetInMes) || 0) };
+    }
+    return { mes: allMes[allMes.length - 1], alive: false, offset: 0 };
+}
+
+function rebuildWindowAroundAnchor(chat, reason) {
+    if (!chat || !document.body.classList.contains('twt-reading-mode')) return;
+    const cw = stableColWidth > 0 ? stableColWidth : getColStep(chat);
+    if (cw <= 0) return;
+    const allMes = Array.from(chat.querySelectorAll(':scope > .mes'));
+    if (!allMes.length) return;
+    if (flipAnim) finishFlipAnimation();
+    if (!userInteractedSinceSwitch && chatRestoreTarget) {
+        applyRestoreTarget(chat, cw);
+        twtDiagLog('WIN_REBUILD', `${reason}: 恢复阶段，重新对齐 mode=${chatRestoreTarget.mode}`);
+        return;
+    }
+    const t0 = performance.now();
+    const found = findAnchorFloorForRebuild(chat, allMes);
+    const idx = Math.max(0, allMes.indexOf(found.mes));
+    applyFloorWindowByIndex(chat, idx, 2, 2);
+    containOversizedElements();
+    const cr = chat.getBoundingClientRect();
+    const sw = chat.scrollWidth;
+    lastKnownScrollWidth = sw;
+    const total = Math.max(1, Math.round(sw / cw));
+    let target = null;
+    let how = 'next';
+    if (found.alive && lineAnchor && Math.abs(lineAnchor.cw - cw) <= 0.5) {
+        const res = resolveLineAnchor(chat, cw, cr);
+        if (res) {
+            target = lastUserPage + (res.page - lineAnchor.page);
+            lineAnchor.page = res.page;
+            if (res.mes) lineAnchor.mesEl = res.mes;
+            how = res.how;
+        }
+    }
+    if (target === null) {
+        const fp = floorPagesOf(chat, cw, cr, found.mes);
+        target = fp ? Math.min(fp.end, fp.start + (found.offset || 0)) : total - 1;
+        if (found.alive) how = 'floor';
+        lineAnchor = null;
+    }
+    target = Math.max(0, Math.min(total - 1, target));
+    const prev = lastUserPage;
+    lastUserPage = target;
+    isScrolling = true;
+    chat.scrollLeft = target * cw;
+    clearTimeout(scrollUnlockTimer);
+    scrollUnlockTimer = setTimeout(() => {
+        isScrolling = false;
+        updateActiveReadingAnchor(true);
+        debouncedSavePaginationPosition();
+    }, 60);
+    twtDiagLog('WIN_REBUILD', `${reason}: 窗口重排 [${winStartIdx}..${winEndIdx}]/${allMes.length} 停在 #${found.mes.getAttribute('mesid')}(${how}) p:${prev}->${target}/${total} cost=${Math.round(performance.now() - t0)}ms`);
+}
+
+// ============================================================
+// 翻页动画（可选：无 / 滑动 / 淡入）
+// ============================================================
+// 只用于用户主动翻页（点按、滑动、键盘）。滑动用 rAF 改 scrollLeft，淡入只改 #chat 的透明度（合成层动画，不重排）。
+let flipAnim = null;            // { raf, chat, from, to, start, dur, onDone }
+let fadeAnim = null;
+
+function getFlipAnimationMode() {
+    const m = extension_settings?.twt?.pageFlipAnimation;
+    return m === 'slide' || m === 'fade' ? m : 'none';
+}
+
+function finishFlipAnimation() {
+    const a = flipAnim;
+    if (!a) return;
+    flipAnim = null;
+    if (a.raf) cancelAnimationFrame(a.raf);
+    a.chat.scrollLeft = a.to;
+    if (a.onDone) a.onDone();
+}
+
+function cancelFlipEffects() {
+    if (flipAnim) finishFlipAnimation();
+    if (fadeAnim) {
+        try { fadeAnim.cancel(); } catch {}
+        fadeAnim = null;
+    }
+}
+
+function startSlideAnimation(chat, to, cw, onDone) {
+    const from = chat.scrollLeft;
+    const dist = Math.abs(to - from);
+    if (dist < 2 || cw <= 0) return false;
+    // 手指拖到一半松开时剩下的距离短，动画也相应短一些
+    const dur = Math.round(Math.max(120, Math.min(1, dist / cw) * 220));
+    const a = { raf: 0, chat, from, to, start: performance.now(), dur, onDone };
+    const step = (now) => {
+        if (flipAnim !== a) return;
+        const t = Math.min(1, (now - a.start) / a.dur);
+        const e = 1 - Math.pow(1 - t, 3);
+        if (t >= 1) {
+            finishFlipAnimation();
+            return;
+        }
+        chat.scrollLeft = a.from + (a.to - a.from) * e;
+        a.raf = requestAnimationFrame(step);
+    };
+    flipAnim = a;
+    a.raf = requestAnimationFrame(step);
+    return true;
+}
+
+function startFadeAnimation(chat) {
+    if (typeof chat.animate !== 'function') return;
+    if (fadeAnim) {
+        try { fadeAnim.cancel(); } catch {}
+    }
+    try {
+        fadeAnim = chat.animate([{ opacity: 0.25 }, { opacity: 1 }], { duration: 200, easing: 'ease-out' });
+        const mine = fadeAnim;
+        mine.onfinish = () => { if (fadeAnim === mine) fadeAnim = null; };
+    } catch {
+        fadeAnim = null;
+    }
 }
 
 export function lockReadingPosition() {
@@ -1001,6 +1514,9 @@ export function realignToActiveAnchor() {
         applyRestoreTarget(chat, step);
         return true;
     }
+
+    // 优先按页首那一行字对齐（比"第几楼的第几页"准：楼层里前半段变高变矮也能对上）
+    if (realignToLineAnchor(chat, step)) return true;
 
     if (!activeReadingAnchor || !activeReadingAnchor.mesId) return false;
 
@@ -1051,6 +1567,8 @@ export function realignToMessageStart(mesId) {
     const absLeft = rect.left - chatRect.left + chat.scrollLeft;
     const targetPage = Math.max(0, Math.floor(absLeft / step));
 
+    cancelFlipEffects();
+    lineAnchor = null;
     chat.scrollLeft = targetPage * step;
     chat.scrollTop = 0;
     lastUserPage = targetPage;
@@ -1198,9 +1716,19 @@ export async function handleMoreMessagesLoaded(isExplicitJump = isExplicitJumpLo
     void chat.offsetHeight;
 
     const step = getColStep(chat);
+    // 不是往前翻触发的加载：按页首那一行字保持位置（比按楼层左边缘算更准）
+    if (!pendingFlipBackwards && lineAnchor) {
+        const kept = keepReadingLine('more-loaded', true);
+        if (kept === 'moved' || kept === 'same') {
+            updateActiveReadingAnchor();
+            return;
+        }
+    }
     if (activeReadingAnchor && activeReadingAnchor.mesId && step > 0) {
         const anchorEl = chat.querySelector(`.mes[mesid="${activeReadingAnchor.mesId}"]`);
         if (anchorEl) {
+            // 下面按楼层位置自己补偿，之前记的那行字作废，补偿完重新记
+            lineAnchor = null;
             const chatRect = chat.getBoundingClientRect();
             const currentVisualLeft = anchorEl.getBoundingClientRect().left - chatRect.left;
             const shift = currentVisualLeft - (activeReadingAnchor.visualLeft || 0);
@@ -1262,31 +1790,34 @@ export function handleNewMessageRendered(messageId, settings = extension_setting
 
     requestAnimationFrame(() => {
         if (!document.body.classList.contains('twt-reading-mode')) return;
+        if (flipAnim) finishFlipAnimation();
+        const pickTarget = () => {
+            if (messageId !== undefined && messageId !== null) return chat.querySelector(`:scope > .mes[mesid="${messageId}"]`);
+            const all = chat.querySelectorAll(':scope > .mes');
+            return all.length > 0 ? all[all.length - 1] : null;
+        };
+        // 关键校验 2：读者已经自己翻进这条新回复里在看了，就不拽走。
+        // 要在换窗口之前、按屏幕上实际显示的内容判断：换窗口会隐藏前面的楼层，页码整体变化，
+        // 原来换完窗口再拿旧页码比，可能碰巧落进新楼层的页码范围，新消息就不跳了。
+        const alreadyReading = isFloorOnScreen(chat, pickTarget());
+        const cw0 = stableColWidth > 0 ? stableColWidth : getColStep(chat);
+        if (cw0 > 0) ensureLineAnchor(chat, cw0);
         activateWindowForMessage(messageId ?? 'end');
+        // 换窗口后按页首那行字把页码换算到新窗口（不跳的时候读者停在原处）
+        if (lineAnchor) keepReadingLine('new-msg', true);
+        if (alreadyReading) return;
         const step = getColStep(chat);
         if (step <= 0) return;
 
         const total = Math.max(1, Math.round(chat.scrollWidth / step));
         let targetPage = total - 1;
 
-        const allMes = chat.querySelectorAll(':scope > .mes');
-        const lastMes = allMes.length > 0 ? allMes[allMes.length - 1] : null;
-        const targetMes = (messageId !== undefined && messageId !== null)
-            ? chat.querySelector(`.mes[mesid="${messageId}"]`)
-            : lastMes;
+        const targetMes = pickTarget();
         if (targetMes && (targetMes.offsetWidth > 0 || targetMes.offsetHeight > 0)) {
                 const chatRect = chat.getBoundingClientRect();
                 const rect = targetMes.getBoundingClientRect();
                 const absLeft = rect.left - chatRect.left + chat.scrollLeft;
                 const mesStartPage = Math.max(0, Math.min(total - 1, Math.floor(absLeft / step)));
-                const absRight = rect.right - chatRect.left + chat.scrollLeft;
-                const mesEndPage = Math.max(0, Math.min(total - 1, Math.floor((absRight - 1) / step)));
-
-                // 关键校验 2：如果读者已经自主翻到了该新回复范围内开始阅读（从起始页到尾页）
-                // 尊重读者的自主阅读节奏，严禁在后续分段渲染或完成时强行将视口拽到剧透结尾！
-                if (lastUserPage >= mesStartPage && lastUserPage <= mesEndPage) {
-                    return;
-                }
 
                 // 首次自动翻页进入新楼层：对齐到新楼层的第一页（起始位置），方便自上而下阅读，而不是跳到结尾
                 targetPage = mesStartPage;
@@ -1308,17 +1839,25 @@ export function handleMessageDeleted() {
     if (!chat || !document.body.classList.contains('twt-reading-mode')) return;
 
     requestAnimationFrame(() => {
-        const step = getColStep(chat);
+        if (!document.body.classList.contains('twt-reading-mode')) return;
+        const step = stableColWidth > 0 ? stableColWidth : getColStep(chat);
         if (step <= 0) return;
-        const total = Math.max(1, Math.round(chat.scrollWidth / step));
-        const allMes = chat.querySelectorAll('.mes');
-        if (!allMes.length) return;
+        if (!chat.querySelector(':scope > .mes')) return;
 
-        // 如果读者当前阅读的位置超出了新总页数，或锚点已被删除
-        const anchorEl = (activeReadingAnchor && activeReadingAnchor.mesId) ? chat.querySelector(`.mes[mesid="${activeReadingAnchor.mesId}"]`) : null;
-        if (!anchorEl || lastUserPage >= total) {
-            const targetPage = Math.max(0, Math.min(lastUserPage, total - 1));
-            scrollToPage(chat, targetPage, step);
+        // 窗口被删坏了（窗口第一楼没了 / 没有可见楼层 / 读者那一楼没了）：以读者所在位置为中心重排窗口。
+        // 平时 MutationObserver 在删除的同一时刻已经处理过，这里是兜底。
+        const visible = chat.querySelector(':scope > .mes:not([data-twt-win-hidden])');
+        const anchorGone = !!(lineAnchor && !(lineAnchor.node && lineAnchor.node.isConnected) &&
+            !(lineAnchor.mesEl && lineAnchor.mesEl.isConnected) && !floorOfMessageObj(chat, lineAnchor.msgObj));
+        if (!visible || !winStartEl || !winStartEl.isConnected || anchorGone) {
+            rebuildWindowAroundAnchor(chat, 'MESSAGE_DELETED');
+            return;
+        }
+        keepReadingLine('deleted');
+        const total = Math.max(1, Math.round(chat.scrollWidth / step));
+        if (lastUserPage >= total) {
+            scrollToPage(chat, total - 1, step);
+        } else if (!isScrolling) {
             updateActiveReadingAnchor();
         }
     });
@@ -1553,6 +2092,8 @@ let scrollUnlockTimer = null;
 function getSyncedCurrentPage(chat, cw) {
     const step = cw || getColStep(chat);
     if (!chat || step <= 0) return lastUserPage;
+    // 翻页动画播放中 scrollLeft 停在两页之间，以动画终点为准
+    if (flipAnim) return lastUserPage;
     const sw = chat.scrollWidth || step;
     lastKnownScrollWidth = sw;
     const maxPage = Math.max(0, Math.round(sw / step) - 1);
@@ -1580,10 +2121,13 @@ function schedulePreSlide(direction) {
     }, 180);
 }
 
-function scrollToPage(chat, page, cw, knownTotal = 0) {
+// animate：用户主动翻页时按设置播放翻页动画（其他程序化跳转一律瞬间到位）
+function scrollToPage(chat, page, cw, knownTotal = 0, animate = false) {
     if (!chat) return;
     const step = cw || getColStep(chat);
     if (step <= 0) return;
+    // 上一次翻页动画还没播完：直接放到终点，从那里接着算
+    if (flipAnim) finishFlipAnimation();
     const sw = knownTotal > 0 ? (knownTotal * step) : (chat.scrollWidth || step);
     lastKnownScrollWidth = sw;
     const total = Math.max(1, Math.round(sw / step));
@@ -1595,18 +2139,46 @@ function scrollToPage(chat, page, cw, knownTotal = 0) {
     lastUserPage = page;
     isScrolling = true;
 
-    clearTimeout(scrollUnlockTimer);
-    scrollUnlockTimer = setTimeout(() => {
+    const settle = () => {
         isScrolling = false;
         updateActiveReadingAnchor(true);
         debouncedSavePaginationPosition();
-    }, 60);
+    };
+    const preSlideDir = (page !== prevPage && userInteractedSinceSwitch) ? (page < prevPage ? 'preload-left' : 'preload-right') : null;
 
+    clearTimeout(scrollUnlockTimer);
     twtDiagLog('SCROLL_TO_PAGE', `p: ${prevPage}->${page} (req=${reqPage}, total=${total})`);
-    chat.scrollLeft = targetScrollLeft;
-    if (page !== prevPage && userInteractedSinceSwitch) {
-        schedulePreSlide(page < prevPage ? 'preload-left' : 'preload-right');
+
+    // 到位的同一时刻就记下新页的页首那一行字。原来要等 60ms 解锁后才记，
+    // 这段时间里上一楼末尾变高的话，锚点还在上一页、看不出当前页被挤走了。
+    const trackLine = userInteractedSinceSwitch && document.body.classList.contains('twt-reading-mode');
+    const mode = animate ? getFlipAnimationMode() : 'none';
+    if (mode === 'slide' && Math.abs(chat.scrollLeft - targetScrollLeft) >= 2) {
+        if (trackLine) {
+            // 动画开始前先临时跳到目标页记锚点再跳回来（同一个任务里，不会画出来）
+            const fromSL = chat.scrollLeft;
+            quietScrollWrites = true;
+            chat.scrollLeft = targetScrollLeft;
+            captureLineAnchorNow(chat, step);
+            chat.scrollLeft = fromSL;
+            quietScrollWrites = false;
+        }
+        if (startSlideAnimation(chat, targetScrollLeft, step, () => {
+            // 动画播完再解锁、记锚点、提前滑窗口
+            clearTimeout(scrollUnlockTimer);
+            scrollUnlockTimer = setTimeout(settle, 30);
+            if (preSlideDir) schedulePreSlide(preSlideDir);
+        })) {
+            return;
+        }
     }
+
+    scrollUnlockTimer = setTimeout(settle, 60);
+    chat.scrollLeft = targetScrollLeft;
+    if (trackLine) captureLineAnchorNow(chat, step);
+    else if (lineAnchor && Math.abs(page - lineAnchor.page) > 2) lineAnchor = null;
+    if (mode === 'fade' && page !== prevPage) startFadeAnimation(chat);
+    if (preSlideDir) schedulePreSlide(preSlideDir);
 }
 
 // ============================================================
@@ -1651,11 +2223,16 @@ function doSnap(chat) {
 /**
  * 根据切入聊天时的恢复目标（末尾 / 指定锚点楼层 / 指定页），将视口精准对齐到目标列
  */
-function applyRestoreTarget(chat, cw) {
+function applyRestoreTarget(chat, cw, light = false) {
     if (!chat || cw <= 0 || !chatRestoreTarget) return;
-    if (chatRestoreTarget.mode === 'end') {
+    // light：只重新算目标页（楼层尺寸变化时在绘制前调用），不动窗口，已经在目标页上就什么都不做
+    if (light) {
+        // 窗口还没排过时不能只算页码
+        if (!chat.classList.contains('twt-win-ready')) light = false;
+    }
+    if (!light && chatRestoreTarget.mode === 'end') {
         activateWindowForMessage('end');
-    } else if (chatRestoreTarget.mode === 'anchor' && chatRestoreTarget.mesId !== null && chatRestoreTarget.mesId !== undefined) {
+    } else if (!light && chatRestoreTarget.mode === 'anchor' && chatRestoreTarget.mesId !== null && chatRestoreTarget.mesId !== undefined) {
         activateWindowForMessage(chatRestoreTarget.mesId);
     }
     const sw = chat.scrollWidth;
@@ -1694,9 +2271,12 @@ function applyRestoreTarget(chat, cw) {
         targetPage = Math.max(0, Math.min(chatRestoreTarget.page, total - 1));
     }
 
+    if (light && targetPage === lastUserPage && Math.abs(chat.scrollLeft - targetPage * cw) <= 1) return;
+    // 位置是按恢复目标重新定的，之前记的页首那行字作废
+    if (targetPage !== lastUserPage) lineAnchor = null;
     isScrolling = true;
     lastUserPage = targetPage;
-    twtDiagLog('APPLY_RESTORE', `mode=${chatRestoreTarget.mode} targetP=${targetPage} total=${total}`);
+    twtDiagLog('APPLY_RESTORE', `mode=${chatRestoreTarget.mode} targetP=${targetPage} total=${total}${light ? ' (前面楼层尺寸变化)' : ''}`);
     chat.scrollLeft = targetPage * cw;
     chat.scrollTop = 0;
     clearTimeout(scrollUnlockTimer);
@@ -1819,6 +2399,7 @@ function initMutationObserver() {
         let addedShowMore = false;
         let addedLastMes = false;
         let hasMeaningfulDomChange = false;
+        let removedVisibleFloor = false;
         const addedFloors = [];
         if (mutations && mutations.length > 0) {
             for (let i = 0; i < mutations.length; i++) {
@@ -1851,16 +2432,23 @@ function initMutationObserver() {
                                 !node.classList?.contains('twt-app-placeholder')) {
                                 hasMeaningfulDomChange = true;
                             }
+                            // 删掉的是正在排版的楼层（窗口里的）
+                            if (node.nodeType === 1 && m.target === chat && node.classList?.contains('mes') && !node.hasAttribute('data-twt-win-hidden')) {
+                                removedVisibleFloor = true;
+                            }
                         }
                     }
                 }
             }
         }
 
-        // 聊天被清空：旧窗口作废，切聊天遮罩期间重新由 CSS 预裁剪兜底
-        if (chat.children.length <= 1) {
+        // 聊天被清空（一个楼层都没有了）：旧窗口作废，切聊天期间重新由 CSS 预裁剪兜底。
+        // 原来按"子元素不超过 1 个"判断，只有一条开场白的聊天每次 DOM 变化都会被当成清空，翻过的页被重置。
+        const hasFloors = !!chat.querySelector(':scope > .mes');
+        if (!hasFloors) {
             winStartEl = null;
             setClass(chat, 'twt-win-ready', false);
+            lineAnchor = null;
         }
 
         // 补在窗口前面的历史楼层（showMoreMessages 或其他扩展后台加载）在插入的同一微任务里立刻隐藏，
@@ -1882,7 +2470,33 @@ function initMutationObserver() {
         }
 
         const isInitialBatchMount = (addedShowMore || addedLastMes) && isChatRestoring && chatRestoreTarget && !userInteractedSinceSwitch && !isLoadingMoreMessages && !isGenerating && (Date.now() - lastChatSwitchTime < 2500);
-        if (chat.children.length <= 1 || isInitialBatchMount) {
+        // 楼层已经挂上来了但窗口还没排（TauriTavern 手机上切聊天到挂楼层可能超过 2.5 秒，上面的条件不成立）：
+        // 原来要等 200ms 防抖、而 TauriTavern 逐楼填正文时防抖会被一直往后推，期间聊天区是透明的，看起来是一片空白
+        const windowMissing = hasFloors && addedFloors.length > 0 && !isInitialBatchMount && !chat.classList.contains('twt-win-ready') && !isLoadingMoreMessages && !isGenerating;
+
+        // 窗口被打乱：删了窗口里的楼层、窗口第一楼没了，或者在中间插进了没隐藏的新楼层
+        // （TauriTavern 删除中间的消息后，会给后面所有消息换一批新元素，新元素没有隐藏标记）
+        let windowBroken = false;
+        if (hasFloors && !isInitialBatchMount && !windowMissing && chat.classList.contains('twt-win-ready') &&
+            !isLoadingMoreMessages && !isGenerating && document.body.classList.contains('twt-reading-mode')) {
+            if (removedVisibleFloor || (winStartEl && !winStartEl.isConnected)) {
+                windowBroken = true;
+            } else if (addedFloors.length > 0) {
+                // 新楼层后面还有"原来就在"的楼层，才算插在中间（末尾追加新消息不算）
+                const addedSet = new Set(addedFloors);
+                for (const node of addedFloors) {
+                    if (!node.isConnected || node.parentElement !== chat || node.hasAttribute('data-twt-win-hidden')) continue;
+                    let nx = node.nextElementSibling;
+                    while (nx && !(nx.classList?.contains('mes') && !addedSet.has(nx))) nx = nx.nextElementSibling;
+                    if (nx) {
+                        windowBroken = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (!hasFloors || isInitialBatchMount) {
             isChatRestoring = true;
             userInteractedSinceSwitch = false;
             lastChatSwitchTime = Date.now();
@@ -1902,6 +2516,26 @@ function initMutationObserver() {
                 }
                 twtDiagLog('MUT_BATCH_MOUNT', `首屏挂载微任务对齐 hidden=${hiddenCnt} cost=${Math.round(performance.now() - t0)}ms`);
             }
+        } else if (windowMissing) {
+            const t0 = performance.now();
+            if (!userInteractedSinceSwitch && !chatRestoreTarget) chatRestoreTarget = { mode: 'end' };
+            const rawW = stableColWidth > 0 ? stableColWidth : (chat.getBoundingClientRect().width || chat.clientWidth);
+            if (rawW > 0) {
+                if (!stableColWidth) {
+                    chat.style.setProperty('--twt-col-width', `${rawW}px`, 'important');
+                    stableColWidth = rawW;
+                }
+                if (chatRestoreTarget && !userInteractedSinceSwitch) {
+                    applyRestoreTarget(chat, rawW);
+                } else {
+                    activateWindowForMessage('end');
+                }
+            } else {
+                activateWindowForMessage('end');
+            }
+            twtDiagLog('MUT_WIN_INIT', `楼层已挂载、窗口未生效，立即排窗口 cost=${Math.round(performance.now() - t0)}ms`);
+        } else if (windowBroken) {
+            rebuildWindowAroundAnchor(chat, removedVisibleFloor ? 'floor-removed' : 'floor-replaced');
         } else if (addedLastMes && isGenerating) {
             activateWindowForMessage('end');
         }
@@ -1928,7 +2562,9 @@ function initMutationObserver() {
                         applyRestoreTarget(chat, stableColWidth);
                         scheduleRestoreSettle(600);
                     } else if (userInteractedSinceSwitch && !isScrolling) {
-                        const maxPage = Math.max(0, Math.round(sw / stableColWidth) - 1);
+                        // 先按页首那行字补上 ResizeObserver 没抓到的位移（比如只是位置变了、楼层尺寸没变）
+                        keepReadingLine('mut');
+                        const maxPage = Math.max(0, Math.round(chat.scrollWidth / stableColWidth) - 1);
                         if (lastUserPage > maxPage) {
                             lastUserPage = maxPage;
                         }
@@ -2604,6 +3240,8 @@ export function applyPaginationMode(enabled, settings) {
 
         if (resizeObserver) { resizeObserver.disconnect(); resizeObserver = null; }
         disconnectMutationObserver();
+        cancelFlipEffects();
+        disconnectFloorObserver();
         const diagPanel = document.getElementById('twt-diag-panel');
         if (diagPanel) diagPanel.style.display = 'none';
 
@@ -2657,13 +3295,15 @@ export function scrollPageLeft() {
     isChatRestoring = false;
     clearTimeout(chatRestoreSettleTimer);
     hideLoadingOverlay();
+    if (flipAnim) finishFlipAnimation();
+    prepareLineAnchorForFlip(chat, cw);
     slideFloorWindowIfNeeded(chat, cw, 'left');
     const curPage = getSyncedCurrentPage(chat, cw);
     if (curPage <= 0 && winStartIdx <= 0 && document.getElementById('show_more_messages')) {
         triggerLoadMoreMessages(true);
         return;
     }
-    scrollToPage(chat, curPage - 1, cw);
+    scrollToPage(chat, curPage - 1, cw, 0, true);
 }
 
 export function scrollPageRight() {
@@ -2679,12 +3319,17 @@ export function scrollPageRight() {
     isChatRestoring = false;
     clearTimeout(chatRestoreSettleTimer);
     hideLoadingOverlay();
+    if (flipAnim) finishFlipAnimation();
+    prepareLineAnchorForFlip(chat, cw);
     slideFloorWindowIfNeeded(chat, cw, 'right');
     const curPage = getSyncedCurrentPage(chat, cw);
-    scrollToPage(chat, curPage + 1, cw);
+    scrollToPage(chat, curPage + 1, cw, 0, true);
 }
 
 export function setLastUserPage(page) {
+    // 目录跳转等显式定位：之前记的页首那行字作废，到位后重新记
+    cancelFlipEffects();
+    lineAnchor = null;
     lastUserPage = page;
     userInteractedSinceSwitch = true;
     isChatRestoring = false;
@@ -2830,7 +3475,7 @@ export function realignPagination(verbose = true) {
 // ============================================================
 // resetPaginationBinding：切换聊天时重置并重绑定
 // ============================================================
-import { invalidateMuluStoreCache } from '../mulu/mulu.js?v=1.0.28';
+import { invalidateMuluStoreCache } from '../mulu/mulu.js?v=1.0.29';
 
 export function resetPaginationBinding(getSettings) {
     // TauriTavern 在手机上会等楼层内容全部准备好才发 CHAT_CHANGED（日志里比楼层挂载晚了约 30 秒）。
@@ -2896,6 +3541,8 @@ export function resetPaginationBinding(getSettings) {
 
     if (resizeObserver) { resizeObserver.disconnect(); resizeObserver = null; }
     disconnectMutationObserver();
+    cancelFlipEffects();
+    disconnectFloorObserver();
 
     if (!document.body.classList.contains('twt-reading-mode')) return;
 
@@ -3096,6 +3743,8 @@ function handlePageFlip(clientX, targetEl, settings) {
         clearTimeout(chatRestoreSettleTimer);
         hideLoadingOverlay();
         unlockReadingPosition();
+        if (flipAnim) finishFlipAnimation();
+        prepareLineAnchorForFlip(chat, cw);
         slideFloorWindowIfNeeded(chat, cw, 'left');
         const curPage = getSyncedCurrentPage(chat, cw);
         markUserPageFlip();
@@ -3104,7 +3753,7 @@ function handlePageFlip(clientX, targetEl, settings) {
             triggerLoadMoreMessages(true);
             return true;
         }
-        scrollToPage(chat, curPage - 1, cw);
+        scrollToPage(chat, curPage - 1, cw, 0, true);
         return true;
     } else if (ratio > 0.7) {
         if (isInputFocused()) {
@@ -3116,11 +3765,13 @@ function handlePageFlip(clientX, targetEl, settings) {
         clearTimeout(chatRestoreSettleTimer);
         hideLoadingOverlay();
         unlockReadingPosition();
+        if (flipAnim) finishFlipAnimation();
+        prepareLineAnchorForFlip(chat, cw);
         slideFloorWindowIfNeeded(chat, cw, 'right');
         const curPage = getSyncedCurrentPage(chat, cw);
         markUserPageFlip();
         twtDiagLog('FLIP_RIGHT', `ratio=${ratio.toFixed(2)} curP=${curPage} target=${describeEl(targetEl)}`);
-        scrollToPage(chat, curPage + 1, cw);
+        scrollToPage(chat, curPage + 1, cw, 0, true);
         return true;
     }
     twtDiagLog('FLIP_CENTER_NOOP', `点击中间区域不翻页 ratio=${ratio.toFixed(2)} target=${describeEl(targetEl)}`);
@@ -3132,11 +3783,13 @@ function handlePageFlip(clientX, targetEl, settings) {
 // ============================================================
 export function initPaginationEvent(getSettings) {
 
-    // 用户在侧栏/抽屉点击角色或聊天记录切换时，第一时间打上遮罩使 #chat 彻底静默，酒馆清屏期间 0 毫秒闪烁
+    // 用户在侧栏/抽屉点击角色或聊天记录切换时，第一时间打上切换标记使 #chat 彻底静默，酒馆清屏期间 0 毫秒闪烁。
+    // 删除消息的确认栏（#dialogue_del_mes）原来也在这里，删消息会被当成切聊天：位置被重置、聊天区进入切换状态。
+    // 删除后的位置现在由 MutationObserver / handleMessageDeleted 按读者所在楼层处理。
     const onNavClick = (e) => {
         if (!document.body.classList.contains('twt-reading-mode')) return;
         const t = e.target;
-        if (t && t.closest && t.closest('.character_select, .chat_select, .select_chat_block, .select_chat_block_wrapper, [chat_id], [chid], [data-chid], [data-grid], #select_chat, #chat_list, .group_select, #rm_char_group_popup, .menu_button_chat, #dialogue_del_mes')) {
+        if (t && t.closest && t.closest('.character_select, .chat_select, .select_chat_block, .select_chat_block_wrapper, [chat_id], [chid], [data-chid], [data-grid], #select_chat, #chat_list, .group_select, #rm_char_group_popup, .menu_button_chat')) {
             isChatRestoring = true;
             userInteractedSinceSwitch = false;
             userExplicitlyFocusedInput = false;
@@ -3163,6 +3816,8 @@ export function initPaginationEvent(getSettings) {
         if (!userInteractedSinceSwitch && !isGenerating && !isLoadingMoreMessages && chatRestoreTarget) {
             applyRestoreTarget(chat, cw);
         } else {
+            // 前面楼层里的代码块 / 界面被收起，后面内容整体前移：先按页首那行字补回来
+            keepReadingLine('apps-hidden');
             getSyncedCurrentPage(chat, cw);
             updateActiveReadingAnchor(true);
         }
@@ -3289,6 +3944,8 @@ function bindScrollEvents(getSettings) {
         const settings = getSettings();
         if (!settings?.enabled) return;
 
+        // 上一次翻页动画还没播完：直接放到终点，手指从那一页开始拖
+        if (flipAnim) finishFlipAnimation();
         // 关键修复：立即清除上一轮翻页遗留的 600ms fallback 与 scrollend 监听，防止快速连续翻页时中途把 isTouching 误置为 false 导致卡死！
         cancelPendingTouchCleanup();
         clearTimeout(snapTimer);
@@ -3306,6 +3963,7 @@ function bindScrollEvents(getSettings) {
 
         const cw = stableColWidth > 0 ? stableColWidth : getColWidth(chat);
         if (cw > 0) {
+            ensureLineAnchor(chat, cw);
             slideFloorWindowIfNeeded(chat, cw, 'auto');
         }
         const sw = chat.scrollWidth || (cw * touchTotalPages);
@@ -3414,7 +4072,7 @@ function bindScrollEvents(getSettings) {
             // 若点击在中间非翻页区但 touchmove 产生了轻微偏移，复原到起始页
             if (wasHorizontal && Math.abs(chat.scrollLeft - touchStartLeft) > 1) {
                 const cw = getColWidth(chat);
-                if (cw > 0) scrollToPage(chat, touchStartPage, cw, touchTotalPages);
+                if (cw > 0) scrollToPage(chat, touchStartPage, cw, touchTotalPages, true);
             }
             return;
         }
@@ -3466,7 +4124,7 @@ function bindScrollEvents(getSettings) {
             }
 
             isTouching = false;
-            scrollToPage(chat, targetPage, cw, touchTotalPages);
+            scrollToPage(chat, targetPage, cw, touchTotalPages, true);
             return;
         }
 
@@ -3475,6 +4133,7 @@ function bindScrollEvents(getSettings) {
 
     chat.addEventListener('touchcancel', () => {
         cancelPendingTouchCleanup();
+        if (flipAnim) finishFlipAnimation();
         isTouching        = false;
         isScrolling       = false;
         touchIsHorizontal = null;

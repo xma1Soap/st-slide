@@ -2,8 +2,8 @@
 import { getContext } from '../../../../../extensions.js';
 import { hideChatMessageRange } from '../../../../../chats.js';
 import { updateViewMessageIds, refreshSwipeButtons, closeMessageEditor } from '../../../../../../script.js';
-import { openParagraphEditor } from '../paragraph/paragraph.js?v=1.0.28';
-import { scrollPageLeft, scrollPageRight, realignPagination } from '../pagination/pagination.js?v=1.0.28';
+import { openParagraphEditor } from '../paragraph/paragraph.js?v=1.0.29';
+import { scrollPageLeft, scrollPageRight, realignPagination } from '../pagination/pagination.js?v=1.0.29';
 
 /**
  * High-performance batch message deletion.
@@ -334,7 +334,7 @@ function showContextMenu(e, $mes, clientX, clientY, settings) {
                     icon: 'fa-regular fa-comment-dots',
                     isGridItem: true,
                     onClick: async () => {
-                        const { triggerBatchCommentsForMessage } = await import('../paragraph/paragraph.js?v=1.0.28');
+                        const { triggerBatchCommentsForMessage } = await import('../paragraph/paragraph.js?v=1.0.29');
                         await triggerBatchCommentsForMessage(mesId);
                     }
                 });

@@ -35,12 +35,18 @@ body.twt-reading-mode #chat {
     contain: none !important;
 }
 
-/* 切换聊天时，楼层窗口生效（已定位到最新楼层）之前先把聊天区隐藏，避免闪现第 0 页 (#show_more_messages)。
-   窗口和定位在同一帧里完成，正常情况下看不到这一步。原来盖满全屏的齿轮加载蒙层已去掉：
-   它会挡住所有点击，TauriTavern 在手机上较晚发 CHAT_CHANGED 时还会在阅读途中再闪一次。 */
-body.twt-reading-mode.twt-chat-switching #chat:not(.twt-win-ready),
-body.twt-reading-mode #chat.twt-chat-switching:not(.twt-win-ready) {
-    opacity: 0 !important;
+/* 1.0.28 在这里加过"窗口生效前把聊天区设为透明"，TauriTavern 手机上楼层挂得慢、窗口迟迟不生效时，
+   整个聊天区一直是透明的，看起来是一片空白（露出背景图）。现在楼层一挂上来就在同一个微任务里排好窗口、
+   定好位置（见 pagination.js 的 MUT_WIN_INIT），不需要再隐藏聊天区，这条规则已去掉。 */
+
+/* TauriTavern 的楼层正文是排队处理的，处理完之前 .mes_text 是空的（aria-busy="true"）。
+   翻页模式下一页只有一楼，正好停在一个空楼层上时就像白屏，这里给个提示。 */
+body.twt-reading-mode #chat .mes_text[aria-busy="true"]:empty::before {
+    content: "正文加载中…";
+    display: block;
+    padding: 0.6em 0;
+    opacity: 0.55;
+    font-size: 0.9em;
 }
 
 /* 防护消息块的离屏隔离（避免使用通用选择器 * 以防止大规模 CSS 匹配降级） */

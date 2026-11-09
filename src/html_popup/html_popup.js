@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { extension_settings, getContext } from '../../../../../extensions.js';
-import { setClass } from '../utils/class_guard.js?v=1.0.28';
+import { setClass } from '../utils/class_guard.js?v=1.0.29';
 
 function getWin() {
     try {

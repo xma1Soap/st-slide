@@ -87,6 +87,19 @@
                 </div>
                 <div class="twt-setting-row"
                     style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">
+                    <label for="twt_page_flip_animation">翻页动画</label>
+                    <select id="twt_page_flip_animation"
+                        style="background: var(--SmartThemeDarkColor); color: var(--SmartThemeBodyColor); border: 1px solid var(--SmartThemeBorderColor); border-radius: 4px; padding: 4px;">
+                        <option value="none">无（默认，最快）</option>
+                        <option value="slide">滑动</option>
+                        <option value="fade">淡入</option>
+                    </select>
+                </div>
+                <div style="font-size: 0.85em; opacity: 0.6; margin-bottom: 15px; margin-top: -2px; padding-left: 2px;">
+                    点按或滑动翻页时的过渡效果，约 0.2 秒。动画播放期间可以继续点，会直接跳到下一页。手机较卡时建议保持"无"。
+                </div>
+                <div class="twt-setting-row"
+                    style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">
                     <label for="twt_message_page_enabled">启用消息分页</label>
                     <input type="checkbox" id="twt_message_page_enabled" />
                 </div>
