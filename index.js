@@ -116,6 +116,17 @@ const escapeHtml = (str) => (str || '')
 
 const extensionName = 'TwT';
 
+// 插件实际安装的文件夹（如 third-party/st-slide）。酒馆安装扩展时用仓库名当文件夹名，
+// 写死 'third-party/TwT' 的话，仓库改名或装成别的名字后设置面板会加载失败（404）。
+const extensionFolder = (() => {
+    try {
+        const dir = decodeURIComponent(new URL('.', import.meta.url).pathname);
+        const m = dir.match(/\/scripts\/extensions\/(third-party\/[^/]+)\/?$/);
+        if (m) return m[1];
+    } catch {}
+    return 'third-party/TwT';
+})();
+
 const defaultSettings = {
     enabled: true,
     diagLogEnabled: false,
@@ -4983,7 +4994,7 @@ function updateCommentsBgSolid() {
 }
 
 jQuery(async () => {
-    const html = await renderExtensionTemplateAsync('third-party/TwT', 'index');
+    const html = await renderExtensionTemplateAsync(extensionFolder, 'index');
     $('#extensions_settings').append(html);
 
     // Teleport editor, text editing, preview, and help overlays to parentDoc.body to escape transform containment
