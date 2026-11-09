@@ -1,12 +1,13 @@
 // @ts-nocheck
 import { extension_settings, getContext, renderExtensionTemplateAsync } from '../../../extensions.js';
-import { applyPaginationMode, initPaginationEvent, resetPaginationBinding, realignPagination, handleMoreMessagesLoaded, handleNewMessageRendered, updateActiveReadingAnchor, handleUserMessageSent, handleMessageSwiped, handleGenerationStarted, handleGenerationEnded, handleMessageDeleted, autoNormalizeBubbleTheme, cleanupBubbleThemeNormalization, generateBubbleThemePatchCss, updateDiagPanelVisibility } from './src/pagination/pagination.js?v=1.0.25';
-import { applyVisualMode } from './src/visual/visual.js?v=1.0.25';
-import { saveFontToStorage, getFontBlobUrl, deleteFontFromStorage } from './src/visual/font_storage.js?v=1.0.25';
-import { initMulu, applyMuluSettings } from './src/mulu/mulu.js?v=1.0.25';
-import { initMenu, applyMenuMode, applyFullscreenMode } from './src/menu/menu.js?v=1.0.25';
-import { initHtmlPopup, applyHtmlPopupSettings, registerHtmlPopupEvents } from './src/html_popup/html_popup.js?v=1.0.25';
-import { registerSlashCommands } from './src/slash_commands.js?v=1.0.25';
+import { applyPaginationMode, initPaginationEvent, resetPaginationBinding, realignPagination, handleMoreMessagesLoaded, handleNewMessageRendered, updateActiveReadingAnchor, handleUserMessageSent, handleMessageSwiped, handleGenerationStarted, handleGenerationEnded, handleMessageDeleted, autoNormalizeBubbleTheme, cleanupBubbleThemeNormalization, generateBubbleThemePatchCss, updateDiagPanelVisibility } from './src/pagination/pagination.js?v=1.0.26';
+import { applyVisualMode } from './src/visual/visual.js?v=1.0.26';
+import { setClass } from './src/utils/class_guard.js?v=1.0.26';
+import { saveFontToStorage, getFontBlobUrl, deleteFontFromStorage } from './src/visual/font_storage.js?v=1.0.26';
+import { initMulu, applyMuluSettings } from './src/mulu/mulu.js?v=1.0.26';
+import { initMenu, applyMenuMode, applyFullscreenMode } from './src/menu/menu.js?v=1.0.26';
+import { initHtmlPopup, applyHtmlPopupSettings, registerHtmlPopupEvents } from './src/html_popup/html_popup.js?v=1.0.26';
+import { registerSlashCommands } from './src/slash_commands.js?v=1.0.26';
 
 let parentDoc = document;
 try {
@@ -5022,9 +5023,9 @@ jQuery(async () => {
     initPaginationEvent(() => extension_settings.twt);
     initMenu(() => extension_settings.twt, (active) => {
         isExcerptModeActive = active;
-        document.body.classList.toggle('twt-excerpt-active', active);
+        setClass(document.body, 'twt-excerpt-active', active);
         if (parentDoc && parentDoc.body) {
-            parentDoc.body.classList.toggle('twt-excerpt-active', active);
+            setClass(parentDoc.body, 'twt-excerpt-active', active);
         }
         updateInjectedStyles();
     });

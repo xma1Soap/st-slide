@@ -1,7 +1,8 @@
 // @ts-nocheck
 import { extension_settings, getContext } from '../../../../../extensions.js';
 import { showMoreMessages } from '../../../../../../script.js';
-import { hideMessageHtmlAppsSync } from '../html_popup/html_popup.js?v=1.0.25';
+import { hideMessageHtmlAppsSync } from '../html_popup/html_popup.js?v=1.0.26';
+import { setClass } from '../utils/class_guard.js?v=1.0.26';
 
 // ============================================================
 // P1：TauriTavern API 接入层 — 阅读位置记忆
@@ -185,15 +186,14 @@ function ensureLoadingOverlay() {
 
 function showLoadingOverlay() {
     ensureLoadingOverlay();
-    document.body.classList.add('twt-chat-switching');
-    const chat = getChat();
-    if (chat) chat.classList.add('twt-chat-switching');
+    setClass(document.body, 'twt-chat-switching', true);
+    setClass(getChat(), 'twt-chat-switching', true);
 }
 
+// 每次翻页都会调用，必须先判断再写，否则会触发酒馆对整页的按钮扫描（见 class_guard.js）
 function hideLoadingOverlay() {
-    document.body.classList.remove('twt-chat-switching');
-    const chat = getChat();
-    if (chat) chat.classList.remove('twt-chat-switching');
+    setClass(document.body, 'twt-chat-switching', false);
+    setClass(getChat(), 'twt-chat-switching', false);
 }
 
 /**
@@ -333,7 +333,7 @@ function ensureDiagPanel() {
 
     panel.innerHTML = `
         <div id="twt-diag-header" style="display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap;">
-            <span id="twt-diag-status" style="font-weight:bold;color:#38bdf8;font-size:11px;">📊 TwT v1.0.25 诊断就绪</span>
+            <span id="twt-diag-status" style="font-weight:bold;color:#38bdf8;font-size:11px;">📊 TwT v1.0.26 诊断就绪</span>
             <div style="display:flex;gap:5px;align-items:center;">
                 <button id="twt-diag-copy-btn" type="button" style="background:#0284c7;color:#fff;border:none;border-radius:4px;padding:3px 7px;font-size:11px;cursor:pointer;font-weight:bold;">📋 复制日志</button>
                 <button id="twt-diag-clear-btn" type="button" style="background:#475569;color:#fff;border:none;border-radius:4px;padding:3px 6px;font-size:11px;cursor:pointer;">清空</button>
@@ -2520,20 +2520,20 @@ body.twt-reading-mode #chat .mes .mes_timer {
 
 export function applyPaginationMode(enabled, settings) {
     if (enabled) {
-        document.body.classList.add('twt-reading-mode');
+        setClass(document.body, 'twt-reading-mode', true);
         if (isDiagEnabled(settings)) ensureDiagPanel();
         startLagDetector();
         twtDiagLog('APPLY_PAGINATION', '翻页阅读模式已开启');
         const chat = getChat();
         if (chat) lockChatScrollTop(chat);
         if (settings) {
-            document.body.classList.toggle('twt-swipe-disabled',      !settings.swipeEnabled);
-            document.body.classList.toggle('twt-message-page',        !!settings.messagePageEnabled);
-            document.body.classList.toggle('twt-avatar-theme-layout', settings.avatarLayoutMode === 'theme');
-            document.body.classList.toggle('twt-toolcall-hide',       settings.toolCallMode === 'hide');
-            document.body.classList.toggle('twt-toolcall-compact',    settings.toolCallMode === 'compact');
-            document.body.classList.toggle('twt-toolcall-minimal',    (settings.toolCallMode || 'minimal') === 'minimal');
-            document.body.classList.toggle('twt-toolcall-no-break',   settings.toolCallNoPageBreak !== false);
+            setClass(document.body, 'twt-swipe-disabled',      !settings.swipeEnabled);
+            setClass(document.body, 'twt-message-page',        !!settings.messagePageEnabled);
+            setClass(document.body, 'twt-avatar-theme-layout', settings.avatarLayoutMode === 'theme');
+            setClass(document.body, 'twt-toolcall-hide',       settings.toolCallMode === 'hide');
+            setClass(document.body, 'twt-toolcall-compact',    settings.toolCallMode === 'compact');
+            setClass(document.body, 'twt-toolcall-minimal',    (settings.toolCallMode || 'minimal') === 'minimal');
+            setClass(document.body, 'twt-toolcall-no-break',   settings.toolCallNoPageBreak !== false);
             tagToolCallMessages(settings);
         }
         autoNormalizeBubbleTheme(settings);
@@ -2544,11 +2544,11 @@ export function applyPaginationMode(enabled, settings) {
         initVirtualKeyboardGuard();
         initMutationObserver();
     } else {
-        document.body.classList.remove(
+        [
             'twt-reading-mode', 'twt-swipe-disabled', 'twt-chat-switching',
             'twt-message-page', 'twt-avatar-theme-layout',
             'twt-toolcall-hide', 'twt-toolcall-compact', 'twt-toolcall-minimal', 'twt-toolcall-no-break'
-        );
+        ].forEach(cls => setClass(document.body, cls, false));
         window.removeEventListener('resize', onWindowResize);
         cleanupBubbleThemeNormalization();
 
@@ -2560,7 +2560,7 @@ export function applyPaginationMode(enabled, settings) {
         const chat = getChat();
         if (chat) unlockChatScrollTop(chat);
         if (chat) {
-            chat.classList.remove('twt-chat-switching');
+            setClass(chat, 'twt-chat-switching', false);
             chat.querySelectorAll('.twt-mes-window-hidden').forEach(el => {
                 el.classList.remove('twt-mes-window-hidden');
             });
@@ -2780,7 +2780,7 @@ export function realignPagination(verbose = true) {
 // ============================================================
 // resetPaginationBinding：切换聊天时重置并重绑定
 // ============================================================
-import { invalidateMuluStoreCache } from '../mulu/mulu.js?v=1.0.25';
+import { invalidateMuluStoreCache } from '../mulu/mulu.js?v=1.0.26';
 
 export function resetPaginationBinding(getSettings) {
     twtDiagEpoch = Date.now();
@@ -2943,6 +2943,15 @@ function isInteractiveTarget(targetEl, settings, chat) {
 
 const PAGE_FLIP_COOLDOWN_MS = 220;
 
+/**
+ * 记录"用户刚刚翻过页"的时间点。
+ * 手机上连续快速点两下翻页会被浏览器当成双击（dblclick），
+ * 段评模块据此判断：刚翻过页的双击不是想打开段评，直接忽略。
+ */
+function markUserPageFlip() {
+    window.__twtLastUserFlipTime = Date.now();
+}
+
 function handlePageFlip(clientX, targetEl, settings) {
     if (!settings?.enabled) return false;
     if (!document.body.classList.contains('twt-reading-mode')) return false;
@@ -3010,8 +3019,11 @@ function handlePageFlip(clientX, targetEl, settings) {
         return false;
     }
 
+    // 按聊天区自身的宽度划分左右点按区。手机上聊天区占满屏幕，效果和按窗口算一样；
+    // 电脑上聊天区居中，按整个窗口算的话左右 30% 根本落不到聊天区里，点击永远翻不了页。
+    const chatRect = chat.getBoundingClientRect();
     const winW = window.innerWidth || document.documentElement.clientWidth || 1;
-    const ratio = clientX / winW;
+    const ratio = chatRect.width > 0 ? (clientX - chatRect.left) / chatRect.width : clientX / winW;
 
     if (ratio < 0.3) {
         if (isInputFocused()) {
@@ -3025,6 +3037,7 @@ function handlePageFlip(clientX, targetEl, settings) {
         unlockReadingPosition();
         slideFloorWindowIfNeeded(chat, cw, 'left');
         const curPage = getSyncedCurrentPage(chat, cw);
+        markUserPageFlip();
         twtDiagLog('FLIP_LEFT', `ratio=${ratio.toFixed(2)} curP=${curPage} target=${describeEl(targetEl)}`);
         if (curPage <= 0 && winStartIdx <= 0 && document.getElementById('show_more_messages')) {
             triggerLoadMoreMessages(true);
@@ -3044,6 +3057,7 @@ function handlePageFlip(clientX, targetEl, settings) {
         unlockReadingPosition();
         slideFloorWindowIfNeeded(chat, cw, 'right');
         const curPage = getSyncedCurrentPage(chat, cw);
+        markUserPageFlip();
         twtDiagLog('FLIP_RIGHT', `ratio=${ratio.toFixed(2)} curP=${curPage} target=${describeEl(targetEl)}`);
         scrollToPage(chat, curPage + 1, cw);
         return true;
@@ -3097,7 +3111,9 @@ export function initPaginationEvent(getSettings) {
     const onDocumentClick = (e) => {
         if (e.target?.closest?.('#twt-diag-panel')) return;
         const now = Date.now();
-        if (now - lastPageTurnTime < 450 || now - lastTouchEndTime < 800) {
+        // 触摸后浏览器补发的 click 由 lastTouchEndTime 判断；鼠标连点只需和其他翻页方式一样的冷却时间，
+        // 原先固定 450ms 会让电脑上稍快的连续点击每隔一下就被吞掉。
+        if (now - lastPageTurnTime < PAGE_FLIP_COOLDOWN_MS || now - lastTouchEndTime < 800) {
             twtDiagLog('DOC_CLICK_SKIP', `忽略触摸后合成click dtTurn=${now - lastPageTurnTime}ms dtTouch=${now - lastTouchEndTime}ms`);
             return;
         }
@@ -3347,6 +3363,7 @@ function bindScrollEvents(getSettings) {
             const cw = getColWidth(chat);
             if (cw <= 0) { isTouching = false; return; }
 
+            markUserPageFlip();
             const dx        = touchEndX - touchStartX;
             const fastSwipe = dt < 350 && Math.abs(dx) > 24;
             const longSwipe = Math.abs(dx) > cw * 0.22;

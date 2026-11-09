@@ -1,3 +1,4 @@
+import { setClass } from '../utils/class_guard.js?v=1.0.26';
 function getAllDocs() {
     const docs = [document];
     try {
@@ -18,7 +19,7 @@ export function applyVisualMode(enabled, settings) {
     docs.forEach(doc => {
         try {
             if (enabled) {
-                if (doc.body) doc.body.classList.add('twt-visual-mode');
+                setClass(doc.body, 'twt-visual-mode', true);
                 const chatContainer = doc.getElementById('chat');
                 if (chatContainer) {
                     chatContainer.style.setProperty('--twt-padding-top', `${settings.paddingTop}px`, 'important');
@@ -54,9 +55,7 @@ export function applyVisualMode(enabled, settings) {
                     if (chatContainer) {
                         chatContainer.style.setProperty('--twt-font-family', fullFontStack, 'important');
                     }
-                    if (doc.body) {
-                        doc.body.classList.add('twt-custom-font-active');
-                    }
+                    setClass(doc.body, 'twt-custom-font-active', true);
                 } else {
                     if (doc.documentElement) {
                         doc.documentElement.style.removeProperty('--twt-global-font-family');
@@ -64,15 +63,12 @@ export function applyVisualMode(enabled, settings) {
                     if (chatContainer) {
                         chatContainer.style.removeProperty('--twt-font-family');
                     }
-                    if (doc.body) {
-                        doc.body.classList.remove('twt-custom-font-active');
-                    }
+                    setClass(doc.body, 'twt-custom-font-active', false);
                 }
             } else {
-                if (doc.body) {
-                    doc.body.classList.remove('twt-visual-mode');
-                    doc.body.classList.remove('twt-custom-font-active');
-                }
+                // 每次切换聊天、加载历史都会走到这里，先判断再写，避免触发酒馆整页按钮扫描
+                setClass(doc.body, 'twt-visual-mode', false);
+                setClass(doc.body, 'twt-custom-font-active', false);
                 if (doc.documentElement) {
                     doc.documentElement.style.removeProperty('--twt-global-font-family');
                 }

@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { extension_settings, getContext } from '../../../../../extensions.js';
+import { setClass } from '../utils/class_guard.js?v=1.0.26';
 
 function getWin() {
     try {
@@ -1635,10 +1636,15 @@ export function closeHtmlAppModal() {
 
     const doc = getDoc();
     const win = getWin();
-    win.__twtLastHtmlModalCloseTime = Date.now();
-    doc.body?.classList.remove('twt-html-popup-active');
-
     const old = doc.getElementById(MODAL_ID);
+    // 切换聊天、加载历史楼层、删除消息时也会调用这里。只有弹窗真的开着时才记录"刚关闭"的时间：
+    // 翻页模块会在关闭后 450ms 内忽略点按，没开弹窗也记录的话，加载历史后的第一下翻页就会被吞掉。
+    const wasOpen = !!old || !!doc.body?.classList.contains('twt-html-popup-active');
+    if (wasOpen) {
+        win.__twtLastHtmlModalCloseTime = Date.now();
+    }
+    setClass(doc.body, 'twt-html-popup-active', false);
+
     if (old) {
         old.remove();
         console.log('[TwT HtmlPopup] Modal 弹窗已关闭，真实 DOM 已归位');

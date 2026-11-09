@@ -129,7 +129,11 @@ body.twt-reading-mode #chat > #show_more_messages {
     display: none !important;
 }
 
-/* 窗口化按需分列排版：非当前活跃阅读窗口内的楼层完全脱离多列排版流（0ms 布局开销，支撑成千上万页） */
+/* 窗口化按需分列排版：非当前活跃阅读窗口内的楼层完全脱离多列排版流（0ms 布局开销，支撑成千上万页）
+   注意：下方 `body.twt-reading-mode:not(.twt-avatar-theme-layout) #chat .mes { display: block !important }`
+   的优先级更高，原先的 `body.twt-reading-mode #chat > .twt-mes-window-hidden` 会被它盖掉，
+   导致默认头像排版下隐藏完全失效、所有已加载楼层仍参与排版。这里加上 html 前缀把优先级抬上去。 */
+html body.twt-reading-mode #chat > .mes.twt-mes-window-hidden,
 body.twt-reading-mode #chat > .twt-mes-window-hidden {
     display: none !important;
 }

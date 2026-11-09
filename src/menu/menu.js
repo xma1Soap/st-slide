@@ -2,8 +2,8 @@
 import { getContext } from '../../../../../extensions.js';
 import { hideChatMessageRange } from '../../../../../chats.js';
 import { updateViewMessageIds, refreshSwipeButtons, closeMessageEditor } from '../../../../../../script.js';
-import { openParagraphEditor } from '../paragraph/paragraph.js?v=1.0.25';
-import { scrollPageLeft, scrollPageRight, realignPagination } from '../pagination/pagination.js?v=1.0.25';
+import { openParagraphEditor } from '../paragraph/paragraph.js?v=1.0.26';
+import { scrollPageLeft, scrollPageRight, realignPagination } from '../pagination/pagination.js?v=1.0.26';
 
 /**
  * High-performance batch message deletion.
@@ -334,7 +334,7 @@ function showContextMenu(e, $mes, clientX, clientY, settings) {
                     icon: 'fa-regular fa-comment-dots',
                     isGridItem: true,
                     onClick: async () => {
-                        const { triggerBatchCommentsForMessage } = await import('../paragraph/paragraph.js');
+                        const { triggerBatchCommentsForMessage } = await import('../paragraph/paragraph.js?v=1.0.26');
                         await triggerBatchCommentsForMessage(mesId);
                     }
                 });
@@ -509,8 +509,10 @@ function showContextMenu(e, $mes, clientX, clientY, settings) {
                 shortLabel: '归正',
                 icon: 'fa-solid fa-arrows-to-dot',
                 isGridItem: true,
-                onClick: async () => {
-                    const { realignPagination } = await import('../pagination/pagination.js');
+                // 直接用文件顶部已导入的 realignPagination。
+                // 原先这里用不带版本号的 import('../pagination/pagination.js')，浏览器会当成另一个模块再加载一份，
+                // 新的那份里"当前第几页"等记录全是初始值，点"归正"会直接跳回第 0 页。
+                onClick: () => {
                     realignPagination(true);
                 }
             });

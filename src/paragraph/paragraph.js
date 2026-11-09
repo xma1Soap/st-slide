@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { extension_settings, getContext } from '../../../../../extensions.js';
-import { scrollPageLeft, scrollPageRight } from '../pagination/pagination.js?v=1.0.25';
+import { scrollPageLeft, scrollPageRight } from '../pagination/pagination.js?v=1.0.26';
 import { getRegexedString, regex_placement } from '../../../../regex/engine.js';
 
 
@@ -1770,6 +1770,8 @@ window.twtRefreshComments = () => {
 // 双击段落开启间贴评论
 $(document).on('dblclick', '#chat .mes_text .twt-p-line-wrapper, #chat .mes_text p, #chat .mes_text li, #chat .mes_text blockquote, #chat .mes_text pre', function(e) {
     if (!extension_settings.twt || !extension_settings.twt.commentsEnabled) return;
+    // 连续快速点按翻页会被浏览器当成双击，刚翻过页的双击不打开段评
+    if (Date.now() - (window.__twtLastUserFlipTime || 0) < 800) return;
     if ($(e.target).closest('button, a, input, textarea, select, .twt-comment-badge, .twt-p-toolbar-wrap, .twt-range-modal-overlay').length) return;
     
     const $el = $(this);
