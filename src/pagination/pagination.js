@@ -1,8 +1,8 @@
 // @ts-nocheck
 import { extension_settings, getContext } from '../../../../../extensions.js';
 import { showMoreMessages } from '../../../../../../script.js';
-import { hideMessageHtmlAppsSync } from '../html_popup/html_popup.js?v=1.0.29';
-import { setClass } from '../utils/class_guard.js?v=1.0.29';
+import { hideMessageHtmlAppsSync } from '../html_popup/html_popup.js?v=1.0.30';
+import { setClass } from '../utils/class_guard.js?v=1.0.30';
 
 // ============================================================
 // P1：TauriTavern API 接入层 — 阅读位置记忆
@@ -318,7 +318,7 @@ function ensureDiagPanel() {
 
     panel.innerHTML = `
         <div id="twt-diag-header" style="display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap;">
-            <span id="twt-diag-status" style="font-weight:bold;color:#38bdf8;font-size:11px;">📊 TwT v1.0.29 诊断就绪</span>
+            <span id="twt-diag-status" style="font-weight:bold;color:#38bdf8;font-size:11px;">📊 TwT v1.0.30 诊断就绪</span>
             <div style="display:flex;gap:5px;align-items:center;">
                 <button id="twt-diag-copy-btn" type="button" style="background:#0284c7;color:#fff;border:none;border-radius:4px;padding:3px 7px;font-size:11px;cursor:pointer;font-weight:bold;">📋 复制日志</button>
                 <button id="twt-diag-clear-btn" type="button" style="background:#475569;color:#fff;border:none;border-radius:4px;padding:3px 6px;font-size:11px;cursor:pointer;">清空</button>
@@ -365,7 +365,7 @@ function ensureDiagPanel() {
         e.stopPropagation();
         twtDiagLog('USER_COPY_LOGS', '用户点击复制日志按钮');
         const headerInfo = [
-            `=== TwT Pagination Diagnostic Report (v1.0.29) ===`,
+            `=== TwT Pagination Diagnostic Report (v1.0.30) ===`,
             `Time: ${new Date().toISOString()}`,
             `UA: ${navigator.userAgent}`,
             `Viewport: ${window.innerWidth}x${window.innerHeight} (dpr=${window.devicePixelRatio})`,
@@ -3475,7 +3475,7 @@ export function realignPagination(verbose = true) {
 // ============================================================
 // resetPaginationBinding：切换聊天时重置并重绑定
 // ============================================================
-import { invalidateMuluStoreCache } from '../mulu/mulu.js?v=1.0.29';
+import { invalidateMuluStoreCache } from '../mulu/mulu.js?v=1.0.30';
 
 export function resetPaginationBinding(getSettings) {
     // TauriTavern 在手机上会等楼层内容全部准备好才发 CHAT_CHANGED（日志里比楼层挂载晚了约 30 秒）。

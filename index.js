@@ -1,13 +1,13 @@
 // @ts-nocheck
 import { extension_settings, getContext, renderExtensionTemplateAsync } from '../../../extensions.js';
-import { applyPaginationMode, initPaginationEvent, resetPaginationBinding, realignPagination, handleMoreMessagesLoaded, handleNewMessageRendered, updateActiveReadingAnchor, handleUserMessageSent, handleMessageSwiped, handleGenerationStarted, handleGenerationEnded, handleMessageDeleted, autoNormalizeBubbleTheme, cleanupBubbleThemeNormalization, generateBubbleThemePatchCss, updateDiagPanelVisibility } from './src/pagination/pagination.js?v=1.0.29';
-import { applyVisualMode } from './src/visual/visual.js?v=1.0.29';
-import { setClass } from './src/utils/class_guard.js?v=1.0.29';
-import { saveFontToStorage, getFontBlobUrl, deleteFontFromStorage } from './src/visual/font_storage.js?v=1.0.29';
-import { initMulu, applyMuluSettings } from './src/mulu/mulu.js?v=1.0.29';
-import { initMenu, applyMenuMode, applyFullscreenMode } from './src/menu/menu.js?v=1.0.29';
-import { initHtmlPopup, applyHtmlPopupSettings, registerHtmlPopupEvents } from './src/html_popup/html_popup.js?v=1.0.29';
-import { registerSlashCommands } from './src/slash_commands.js?v=1.0.29';
+import { applyPaginationMode, initPaginationEvent, resetPaginationBinding, realignPagination, handleMoreMessagesLoaded, handleNewMessageRendered, updateActiveReadingAnchor, handleUserMessageSent, handleMessageSwiped, handleGenerationStarted, handleGenerationEnded, handleMessageDeleted, autoNormalizeBubbleTheme, cleanupBubbleThemeNormalization, generateBubbleThemePatchCss, updateDiagPanelVisibility } from './src/pagination/pagination.js?v=1.0.30';
+import { applyVisualMode } from './src/visual/visual.js?v=1.0.30';
+import { setClass } from './src/utils/class_guard.js?v=1.0.30';
+import { saveFontToStorage, getFontBlobUrl, deleteFontFromStorage } from './src/visual/font_storage.js?v=1.0.30';
+import { initMulu, applyMuluSettings } from './src/mulu/mulu.js?v=1.0.30';
+import { initMenu, applyMenuMode, applyFullscreenMode } from './src/menu/menu.js?v=1.0.30';
+import { initHtmlPopup, applyHtmlPopupSettings, registerHtmlPopupEvents } from './src/html_popup/html_popup.js?v=1.0.30';
+import { registerSlashCommands } from './src/slash_commands.js?v=1.0.30';
 
 let parentDoc = document;
 try {
