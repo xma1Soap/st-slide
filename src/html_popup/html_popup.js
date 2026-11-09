@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { extension_settings, getContext } from '../../../../../extensions.js';
-import { setClass } from '../utils/class_guard.js?v=1.0.27';
+import { setClass } from '../utils/class_guard.js?v=1.0.28';
 
 function getWin() {
     try {
@@ -977,7 +977,7 @@ export function hideMessageHtmlAppsSync(forceHide = false, notify = true) {
     try {
         // 1. 匹配标准 DOM 元素选择器（翻页阅读模式下仅扫描当前激活窗口内的楼层，窗口滑动时按需增量处理）
         const isReading = doc.body.classList.contains('twt-reading-mode');
-        const mesScope = isReading ? '.mes:not(.twt-mes-window-hidden) ' : '';
+        const mesScope = isReading ? '.mes:not([data-twt-win-hidden]) ' : '';
         const selList = selector.split(',').map(s => s.trim()).filter(Boolean);
         const fullSelector = selList.map(s => `${mesScope}.mes_text ${s}`).join(', ');
         const matchingElements = Array.from(chat.querySelectorAll(fullSelector));

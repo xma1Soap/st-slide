@@ -1,8 +1,8 @@
 // @ts-nocheck
 import { extension_settings, getContext } from '../../../../../extensions.js';
 import { showMoreMessages } from '../../../../../../script.js';
-import { hideMessageHtmlAppsSync } from '../html_popup/html_popup.js?v=1.0.27';
-import { setClass } from '../utils/class_guard.js?v=1.0.27';
+import { hideMessageHtmlAppsSync } from '../html_popup/html_popup.js?v=1.0.28';
+import { setClass } from '../utils/class_guard.js?v=1.0.28';
 
 // ============================================================
 // P1：TauriTavern API 接入层 — 阅读位置记忆
@@ -166,27 +166,10 @@ let winStartEl = null;          // 窗口第一楼的元素，用来判断新插
 let totalDomMesCount = 0;       // DOM 中总 .mes 数量
 
 // ============================================================
-// 进场极简齿轮加载遮罩组件 (Loading Gear Overlay)
+// 切换聊天状态标记（twt-chat-switching）
+// 原来还会显示全屏齿轮加载蒙层，已去掉；现在这个类只用于：首帧 CSS 预裁剪、窗口生效前隐藏聊天区（见 pagination.css）
 // ============================================================
-function ensureLoadingOverlay() {
-    let overlay = document.getElementById('twt-loading-overlay');
-    if (!overlay) {
-        overlay = document.createElement('div');
-        overlay.id = 'twt-loading-overlay';
-        overlay.innerHTML = `
-            <svg class="twt-loading-spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
-                <circle cx="12" cy="12" r="7"/>
-            </svg>
-            <div class="twt-loading-text">正在排版最新楼层...</div>
-        `;
-        document.body.appendChild(overlay);
-    }
-    return overlay;
-}
-
 function showLoadingOverlay() {
-    ensureLoadingOverlay();
     setClass(document.body, 'twt-chat-switching', true);
     setClass(getChat(), 'twt-chat-switching', true);
 }
@@ -335,7 +318,7 @@ function ensureDiagPanel() {
 
     panel.innerHTML = `
         <div id="twt-diag-header" style="display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap;">
-            <span id="twt-diag-status" style="font-weight:bold;color:#38bdf8;font-size:11px;">📊 TwT v1.0.27 诊断就绪</span>
+            <span id="twt-diag-status" style="font-weight:bold;color:#38bdf8;font-size:11px;">📊 TwT v1.0.28 诊断就绪</span>
             <div style="display:flex;gap:5px;align-items:center;">
                 <button id="twt-diag-copy-btn" type="button" style="background:#0284c7;color:#fff;border:none;border-radius:4px;padding:3px 7px;font-size:11px;cursor:pointer;font-weight:bold;">📋 复制日志</button>
                 <button id="twt-diag-clear-btn" type="button" style="background:#475569;color:#fff;border:none;border-radius:4px;padding:3px 6px;font-size:11px;cursor:pointer;">清空</button>
@@ -382,7 +365,7 @@ function ensureDiagPanel() {
         e.stopPropagation();
         twtDiagLog('USER_COPY_LOGS', '用户点击复制日志按钮');
         const headerInfo = [
-            `=== TwT Pagination Diagnostic Report (v1.0.27) ===`,
+            `=== TwT Pagination Diagnostic Report (v1.0.28) ===`,
             `Time: ${new Date().toISOString()}`,
             `UA: ${navigator.userAgent}`,
             `Viewport: ${window.innerWidth}x${window.innerHeight} (dpr=${window.devicePixelRatio})`,
@@ -597,7 +580,7 @@ export function unlockChatScrollTop(chat) {
 // ============================================================
 // 动态楼层滑动窗口引擎 (Windowed On-Demand Floor Layout v1.0.23)
 // 同一时刻仅让当前阅读楼层及其前后各 2 楼（共约 4~5 楼）参与 CSS 多列排版，
-// 其余楼层通过 .twt-mes-window-hidden 暂时移出渲染树，将重排耗时从 600ms+ 降至 <3ms！
+// 其余楼层通过 data-twt-win-hidden 属性 暂时移出渲染树，将重排耗时从 600ms+ 降至 <3ms！
 // ============================================================
 function isHiddenToolCallFloor(mes) {
     return document.body.classList.contains('twt-toolcall-hide') && mes.classList.contains('twt-toolcall-mes');
@@ -668,14 +651,14 @@ function applyFloorWindowByIndex(chat, centerIdx, radiusBefore = 2, radiusAfter 
     for (let i = 0; i < total; i++) {
         const m = allMes[i];
         if (i >= newStart && i <= newEnd) {
-            if (m.classList.contains('twt-mes-window-hidden')) {
-                m.classList.remove('twt-mes-window-hidden');
+            if (m.hasAttribute('data-twt-win-hidden')) {
+                m.removeAttribute('data-twt-win-hidden');
                 newlyRevealed.push(m);
                 anyChanged = true;
             }
         } else {
-            if (!m.classList.contains('twt-mes-window-hidden')) {
-                m.classList.add('twt-mes-window-hidden');
+            if (!m.hasAttribute('data-twt-win-hidden')) {
+                m.setAttribute('data-twt-win-hidden', '');
                 anyChanged = true;
             }
         }
@@ -777,11 +760,15 @@ function slideFloorWindowIfNeeded(chat, cw, direction = 'auto') {
 
     const needSlideLeft = winStartIdx > 0 && (
         (direction === 'left' && curPage <= 2) ||
-        (direction === 'auto' && totalPages >= 5 && curPage <= 1)
+        (direction === 'preload-left' && curPage <= 4) ||
+        // 'auto' 是手指按下时为拖动做准备，只在已经贴着窗口边缘时才滑。
+        // 原来离边缘还有 1 页就滑，会把刚在空闲时提前滑好的窗口又滑回去，翻页时再滑过来，来回重排两次。
+        (direction === 'auto' && curPage <= 0)
     );
     const needSlideRight = winEndIdx < total - 1 && (
         (direction === 'right' && curPage >= totalPages - 3) ||
-        (direction === 'auto' && totalPages >= 5 && curPage >= totalPages - 2)
+        (direction === 'preload-right' && curPage >= totalPages - 5) ||
+        (direction === 'auto' && curPage >= totalPages - 1)
     );
 
     if (!needSlideLeft && !needSlideRight) return false;
@@ -792,7 +779,7 @@ function slideFloorWindowIfNeeded(chat, cw, direction = 'auto') {
     // 在当前窗口内定位视口正处于的锚点楼层
     for (let i = winStartIdx; i <= winEndIdx && i < total; i++) {
         const m = allMes[i];
-        if (m.classList.contains('twt-mes-window-hidden')) continue;
+        if (m.hasAttribute('data-twt-win-hidden')) continue;
         const r = m.getBoundingClientRect();
         if (r.width === 0 && r.height === 0) continue;
         if (r.right > chatRect.left + 4 && r.left < chatRect.right - 4) {
@@ -808,11 +795,14 @@ function slideFloorWindowIfNeeded(chat, cw, direction = 'auto') {
     const anchorMes = allMes[anchorIdx];
     if (!anchorMes) return false;
 
-    // 计算新窗口中心：确保向翻页方向至少推进 2~3 个楼层
+    // 计算新窗口中心：确保向翻页方向至少推进 2~3 个楼层。
+    // 提前滑动（preload-*）时读者可能还在窗口里靠中间的楼层，以读者所在楼层为中心（前 3 后 2），
+    // 否则读者会落在新窗口末尾，下一次按下时又触发反方向的滑动，来回重排。
+    const isPreload = direction === 'preload-left' || direction === 'preload-right';
     let centerIdx = anchorIdx;
-    if (needSlideLeft && centerIdx > winStartIdx) {
+    if (!isPreload && needSlideLeft && centerIdx > winStartIdx) {
         centerIdx = winStartIdx;
-    } else if (needSlideRight && centerIdx < winEndIdx) {
+    } else if (!isPreload && needSlideRight && centerIdx < winEndIdx) {
         centerIdx = winEndIdx;
     }
 
@@ -821,8 +811,11 @@ function slideFloorWindowIfNeeded(chat, cw, direction = 'auto') {
     const oldStart = winStartIdx;
     const oldEnd = winEndIdx;
 
-    const radBefore = needSlideLeft ? 3 : 2;
-    const radAfter = needSlideRight ? 3 : 2;
+    let radBefore = needSlideLeft ? 3 : 2;
+    let radAfter = needSlideRight ? 3 : 2;
+    // 提前滑动至少往前（后）多带 2 楼，否则遇到短楼层（用户消息）时几乎每翻一页都要重排一次；上限 6 楼防止窗口越滑越大
+    if (direction === 'preload-left') radBefore = Math.min(6, Math.max(3, anchorIdx - winStartIdx + 2));
+    if (direction === 'preload-right') radAfter = Math.min(6, Math.max(3, winEndIdx - anchorIdx + 2));
     const changed = applyFloorWindowByIndex(chat, centerIdx, radBefore, radAfter);
     if (!changed) return false;
 
@@ -871,7 +864,7 @@ export function captureReadingAnchor() {
     // 关键防护：若用户刚进入聊天室尚未主动翻页，且恢复目标为最新楼层末尾（mode === 'end'），
     // 直接锚定最后一条可见消息，彻底杜绝因移动端侧栏关闭动画遮挡 elementFromPoint 或多列异步重排而误抓取第 1 条渲染消息（如 74 楼）！
     if (!userInteractedSinceSwitch && (!chatRestoreTarget || chatRestoreTarget.mode === 'end')) {
-        const allNodes = chat.querySelectorAll(':scope > .mes:not(.twt-mes-window-hidden)');
+        const allNodes = chat.querySelectorAll(':scope > .mes:not([data-twt-win-hidden])');
         for (let i = allNodes.length - 1; i >= 0; i--) {
             const m = allNodes[i];
             if (m.offsetWidth > 0 || m.offsetHeight > 0) {
@@ -901,7 +894,7 @@ export function captureReadingAnchor() {
         const py = chatRect.top + chatRect.height * probePoints[i][1];
         const hitEl = document.elementFromPoint(px, py);
         if (hitEl && chat.contains(hitEl)) {
-            const candidate = hitEl.closest('.mes:not(.twt-mes-window-hidden)');
+            const candidate = hitEl.closest('.mes:not([data-twt-win-hidden])');
             if (candidate && (candidate.offsetWidth > 0 || candidate.offsetHeight > 0)) {
                 visibleMes = candidate;
                 break;
@@ -911,7 +904,7 @@ export function captureReadingAnchor() {
 
     // 2. 兜底策略：若像素探测被浮窗遮挡或命中楼层间隙空白，仅在当前激活窗口内的可见消息中二分查找
     if (!visibleMes) {
-        const allNodes = chat.querySelectorAll(':scope > .mes:not(.twt-mes-window-hidden)');
+        const allNodes = chat.querySelectorAll(':scope > .mes:not([data-twt-win-hidden])');
         const messages = [];
         for (let i = 0; i < allNodes.length; i++) {
             const m = allNodes[i];
@@ -1350,19 +1343,20 @@ function getAdaptiveMaxHeight(el, chat, colH, pageBreakEnabled) {
     return remaining > 150 ? remaining - 20 : Math.max(150, Math.min(200, colH - 20));
 }
 
-const POTENTIAL_CONTAINERS_SELECTOR = '.mes:not(.twt-mes-window-hidden) .mes_text > table, .mes:not(.twt-mes-window-hidden) .mes_text > details, .mes:not(.twt-mes-window-hidden) .mes_text > iframe, .mes:not(.twt-mes-window-hidden) .mes_text > section, .mes:not(.twt-mes-window-hidden) .mes_text > form, .mes:not(.twt-mes-window-hidden) .mes_text > article, .mes:not(.twt-mes-window-hidden) .mes_text > div';
+const POTENTIAL_CONTAINERS_SELECTOR = '.mes:not([data-twt-win-hidden]) .mes_text > table, .mes:not([data-twt-win-hidden]) .mes_text > details, .mes:not([data-twt-win-hidden]) .mes_text > iframe, .mes:not([data-twt-win-hidden]) .mes_text > section, .mes:not([data-twt-win-hidden]) .mes_text > form, .mes:not([data-twt-win-hidden]) .mes_text > article, .mes:not([data-twt-win-hidden]) .mes_text > div';
 
 function containOversizedElements() {
     const chat = document.getElementById('chat');
     if (!chat || !document.body.classList.contains('twt-reading-mode')) return;
     if (isGenerating || isInputFocused()) return;
-    const colH = chat.clientHeight;
-    if (colH <= 0) return;
 
-    // 如果启用了 HTML 弹窗召出功能，则跳过在翻页文本流中的断页与强制收容逻辑
+    // 如果启用了 HTML 弹窗召出功能，则跳过在翻页文本流中的断页与强制收容逻辑。
+    // 这个判断要放在读 clientHeight 之前：刚改完楼层窗口时读布局属性会立刻强制整块重排。
     if (extension_settings?.twt?.htmlPopupEnabled !== false) {
         return;
     }
+    const colH = chat.clientHeight;
+    if (colH <= 0) return;
 
     const pageBreakEnabled = extension_settings?.twt?.htmlPageBreakEnabled !== false;
     const chatRect = chat.getBoundingClientRect();
@@ -1570,6 +1564,22 @@ function getSyncedCurrentPage(chat, cw) {
     return lastUserPage;
 }
 
+// 翻完页、画面已经更新之后，如果离已排版楼层的边缘不远，就趁空闲提前把窗口滑过去。
+// 原来要等翻到边缘那一下才在点按里同步滑窗口（重排几楼长文本），手机上那一页会明显顿一下。
+let preSlideTimer = null;
+function schedulePreSlide(direction) {
+    clearTimeout(preSlideTimer);
+    preSlideTimer = setTimeout(() => {
+        preSlideTimer = null;
+        if (!userInteractedSinceSwitch || isTouching || isScrolling || isGenerating || isLoadingMoreMessages || isAligningNewMessage) return;
+        if (!document.body.classList.contains('twt-reading-mode') || document.body.classList.contains('twt-paragraph-editing')) return;
+        const chat = getChat();
+        const cw = stableColWidth > 0 ? stableColWidth : (chat ? getColWidth(chat) : 0);
+        if (!chat || cw <= 0) return;
+        slideFloorWindowIfNeeded(chat, cw, direction);
+    }, 180);
+}
+
 function scrollToPage(chat, page, cw, knownTotal = 0) {
     if (!chat) return;
     const step = cw || getColStep(chat);
@@ -1594,6 +1604,9 @@ function scrollToPage(chat, page, cw, knownTotal = 0) {
 
     twtDiagLog('SCROLL_TO_PAGE', `p: ${prevPage}->${page} (req=${reqPage}, total=${total})`);
     chat.scrollLeft = targetScrollLeft;
+    if (page !== prevPage && userInteractedSinceSwitch) {
+        schedulePreSlide(page < prevPage ? 'preload-left' : 'preload-right');
+    }
 }
 
 // ============================================================
@@ -1857,7 +1870,7 @@ function initMutationObserver() {
             for (const node of addedFloors) {
                 if (node === winStartEl || !node.isConnected) continue;
                 if (node.compareDocumentPosition(winStartEl) & Node.DOCUMENT_POSITION_FOLLOWING) {
-                    if (!node.classList.contains('twt-mes-window-hidden')) node.classList.add('twt-mes-window-hidden');
+                    if (!node.hasAttribute('data-twt-win-hidden')) node.setAttribute('data-twt-win-hidden', '');
                     prepended++;
                 }
             }
@@ -2598,8 +2611,8 @@ export function applyPaginationMode(enabled, settings) {
         if (chat) unlockChatScrollTop(chat);
         if (chat) {
             setClass(chat, 'twt-chat-switching', false);
-            chat.querySelectorAll('.twt-mes-window-hidden').forEach(el => {
-                el.classList.remove('twt-mes-window-hidden');
+            chat.querySelectorAll('[data-twt-win-hidden]').forEach(el => {
+                el.removeAttribute('data-twt-win-hidden');
             });
             chat.querySelectorAll('.twt-pagination-scrollable').forEach(el => {
                 el.style.removeProperty('max-height');
@@ -2817,9 +2830,19 @@ export function realignPagination(verbose = true) {
 // ============================================================
 // resetPaginationBinding：切换聊天时重置并重绑定
 // ============================================================
-import { invalidateMuluStoreCache } from '../mulu/mulu.js?v=1.0.27';
+import { invalidateMuluStoreCache } from '../mulu/mulu.js?v=1.0.28';
 
 export function resetPaginationBinding(getSettings) {
+    // TauriTavern 在手机上会等楼层内容全部准备好才发 CHAT_CHANGED（日志里比楼层挂载晚了约 30 秒）。
+    // 真正切换聊天时酒馆会先清空 #chat，MutationObserver 会把 userInteractedSinceSwitch 复位；
+    // 所以这里仍为 true 说明是同一个聊天迟到的通知，用户已经在翻页了，不能再把位置重置回最新楼层。
+    const chatNow = getChat();
+    if (userInteractedSinceSwitch && mutationObserver && scrollEventsAbortController &&
+        chatNow && chatNow.querySelector(':scope > .mes') && document.body.classList.contains('twt-reading-mode')) {
+        invalidateMuluStoreCache();
+        twtDiagLog('CHAT_SWITCH_KEEP', '迟到的 CHAT_CHANGED：用户已在本聊天翻页，保持当前位置');
+        return;
+    }
     twtDiagEpoch = Date.now();
     lastChatSwitchTime = Date.now();
     ensureDiagPanel();
@@ -3382,6 +3405,10 @@ function bindScrollEvents(getSettings) {
             const handled = handlePageFlip(touchEndX, targetEl, settings);
             if (handled) {
                 lastPageTurnTime = Date.now();
+                // 已经按翻页处理了，不让浏览器再补发 mousedown/mouseup/click：
+                // 酒馆在 document 上挂了大量点击监听（含 $(':focus') 这类全页查询），
+                // 手机上每次点按光这一下就要几十毫秒，是翻页卡顿的主要来源之一
+                if (e.cancelable) e.preventDefault();
                 return;
             }
             // 若点击在中间非翻页区但 touchmove 产生了轻微偏移，复原到起始页
@@ -3444,7 +3471,7 @@ function bindScrollEvents(getSettings) {
         }
 
         isTouching = false;
-    }, { passive: true, signal });
+    }, { passive: false, signal });
 
     chat.addEventListener('touchcancel', () => {
         cancelPendingTouchCleanup();

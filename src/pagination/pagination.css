@@ -35,59 +35,12 @@ body.twt-reading-mode #chat {
     contain: none !important;
 }
 
-/* 切换聊天室时的首帧过渡遮罩，杜绝酒馆清屏瞬间将第 0 页 (#show_more_messages) 闪现给用户 */
-body.twt-reading-mode.twt-chat-switching #chat,
-body.twt-reading-mode #chat.twt-chat-switching {
+/* 切换聊天时，楼层窗口生效（已定位到最新楼层）之前先把聊天区隐藏，避免闪现第 0 页 (#show_more_messages)。
+   窗口和定位在同一帧里完成，正常情况下看不到这一步。原来盖满全屏的齿轮加载蒙层已去掉：
+   它会挡住所有点击，TauriTavern 在手机上较晚发 CHAT_CHANGED 时还会在阅读途中再闪一次。 */
+body.twt-reading-mode.twt-chat-switching #chat:not(.twt-win-ready),
+body.twt-reading-mode #chat.twt-chat-switching:not(.twt-win-ready) {
     opacity: 0 !important;
-    pointer-events: none !important;
-}
-
-/* 进场静默加载蒙层与极简齿轮动画 */
-#twt-loading-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100vw;
-    height: 100vh;
-    z-index: 9999;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 14px;
-    background: var(--SmartThemeBlurTintColor, rgba(18, 18, 22, 0.75));
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.22s ease-out;
-}
-
-body.twt-reading-mode.twt-chat-switching #twt-loading-overlay {
-    opacity: 1;
-    pointer-events: auto;
-}
-
-#twt-loading-overlay .twt-loading-spinner {
-    width: 36px;
-    height: 36px;
-    color: var(--SmartThemeQuoteColor, #88c0d0);
-    animation: twt-spin-gear 2.4s linear infinite;
-    filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.35));
-}
-
-#twt-loading-overlay .twt-loading-text {
-    font-size: 13px;
-    letter-spacing: 0.5px;
-    color: rgba(255, 255, 255, 0.7);
-    font-family: inherit;
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
-    user-select: none;
-}
-
-@keyframes twt-spin-gear {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
 }
 
 /* 防护消息块的离屏隔离（避免使用通用选择器 * 以防止大规模 CSS 匹配降级） */
@@ -132,9 +85,11 @@ body.twt-reading-mode #chat > #show_more_messages {
 /* 窗口化按需分列排版：非当前活跃阅读窗口内的楼层完全脱离多列排版流（0ms 布局开销，支撑成千上万页）
    注意：下方 `body.twt-reading-mode:not(.twt-avatar-theme-layout) #chat .mes { display: block !important }`
    的优先级更高，原先的 `body.twt-reading-mode #chat > .twt-mes-window-hidden` 会被它盖掉，
-   导致默认头像排版下隐藏完全失效、所有已加载楼层仍参与排版。这里加上 html 前缀把优先级抬上去。 */
-html body.twt-reading-mode #chat > .mes.twt-mes-window-hidden,
-body.twt-reading-mode #chat > .twt-mes-window-hidden {
+   导致默认头像排版下隐藏完全失效、所有已加载楼层仍参与排版。这里加上 html 前缀把优先级抬上去。
+   标记用 data-twt-win-hidden 属性而不是 class：酒馆 keyboard.js 监听全页 class 变化，
+   每改一个楼层的 class 都会把该楼层整棵子树的按钮重新扫一遍，滑窗口时手机上会明显卡一下。 */
+html body.twt-reading-mode #chat > .mes[data-twt-win-hidden],
+body.twt-reading-mode #chat > [data-twt-win-hidden] {
     display: none !important;
 }
 

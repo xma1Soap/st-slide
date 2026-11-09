@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { extension_settings, getContext } from '../../../../../extensions.js';
-import { scrollPageLeft, scrollPageRight } from '../pagination/pagination.js?v=1.0.27';
+import { scrollPageLeft, scrollPageRight } from '../pagination/pagination.js?v=1.0.28';
 import { getRegexedString, regex_placement } from '../../../../regex/engine.js';
 
 
@@ -1150,7 +1150,7 @@ export function renderCommentsForMessage(mesId) {
 }
 
 export function renderCommentsForAllVisibleMessages() {
-    const visibleMesEls = document.querySelectorAll('#chat .mes:not(.twt-mes-window-hidden)');
+    const visibleMesEls = document.querySelectorAll('#chat .mes:not([data-twt-win-hidden])');
     visibleMesEls.forEach(mesEl => {
         const mesId = parseInt(mesEl.getAttribute('mesid'));
         if (!isNaN(mesId)) {
